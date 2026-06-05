@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -8,9 +8,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     MODEL_DIR=/runpod-volume/models \
     TMPDIR=/runpod-volume/tmp
 
-RUN rm -rf /etc/apt/sources.list.d/* && \
-    apt-get clean && \
-    apt-get update && apt-get install -y --no-install-recommends \
+# Remove listas quebradas e instala pacotes com tolerância a falhas na atualização
+RUN rm -f /etc/apt/sources.list.d/cuda*.list /etc/apt/sources.list.d/nvidia-ml.list && \
+    apt-get update -y || true && \
+    apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-dev \
@@ -33,13 +34,10 @@ RUN python3 -m pip install --upgrade pip setuptools wheel && \
 
 COPY handler.py /app/handler.py
 
-# Cria as pastas necessárias
 RUN mkdir -p /runpod-volume/models /runpod-volume/tmp /runpod-volume/insightface/models/buffalo_l /runpod-volume/huggingface
 
-# Faz o download do modelo de FaceSwap (inswapper_128.onnx)
 RUN curl -L -o /runpod-volume/models/inswapper_128.onnx https://huggingface.co/ezioruan/inswapper_128.onnx/resolve/main/inswapper_128.onnx
 
-# Faz o download do modelo de detecção facial (buffalo_l) e extrai
 RUN curl -L -o /runpod-volume/insightface/models/buffalo_l.zip https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip && \
     unzip /runpod-volume/insightface/models/buffalo_l.zip -d /runpod-volume/insightface/models/buffalo_l && \
     rm /runpod-volume/insightface/models/buffalo_l.zip
