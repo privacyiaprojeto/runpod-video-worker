@@ -1,0 +1,9 @@
+{
+  "input": {
+    "source_image_url": "https://example.com/source.jpg",
+    "target_video_url": "https://example.com/base-video.mp4",
+    "safety_mode": "licensed_or_consented_assets_only",
+    "max_seconds": 8,
+    "return_base64": true
+  }
+}

@@ -1,0 +1,7 @@
+runpod==1.7.13
+requests==2.32.3
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+insightface==0.7.3
+onnxruntime-gpu==1.18.1
+boto3==1.35.36
