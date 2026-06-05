@@ -8,7 +8,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     MODEL_DIR=/runpod-volume/models \
     TMPDIR=/runpod-volume/tmp
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN rm -f /etc/apt/sources.list.d/cuda*.list && \
+    rm -f /etc/apt/sources.list.d/nvidia-ml.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-dev \
