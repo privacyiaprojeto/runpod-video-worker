@@ -8,16 +8,18 @@ ENV DEBIAN_FRONTEND=noninteractive \
     MODEL_DIR=/runpod-volume/models \
     TMPDIR=/runpod-volume/tmp
 
-# Hotfix: do not mask apt-get update failures with "|| true".
-# The CUDA runtime image already contains the CUDA runtime libs we need, so we remove
-# NVIDIA/CUDA apt source files that commonly break apt in GitHub Actions runners.
+# Hotfix v2:
+# Some NVIDIA/CUDA base images now ship apt sources as .sources, not only .list.
+# If these stale NVIDIA/CUDA source files remain, apt-get update/install can fail with exit code 100.
+# We only need the CUDA runtime libraries already baked into the base image, so we remove
+# external CUDA/NVIDIA apt source definitions before installing OS packages.
 RUN set -eux; \
-    rm -f /etc/apt/sources.list.d/cuda*.list \
-          /etc/apt/sources.list.d/nvidia*.list \
-          /etc/apt/sources.list.d/nvidia-ml.list || true; \
+    find /etc/apt/sources.list.d -maxdepth 1 -type f \
+      \( -iname '*cuda*' -o -iname '*nvidia*' \) \
+      -print -delete || true; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*; \
-    apt-get update; \
+    apt-get update -o Acquire::Retries=5; \
     apt-get install -y --no-install-recommends \
       python3 \
       python3-pip \
