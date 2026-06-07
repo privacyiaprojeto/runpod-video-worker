@@ -40,6 +40,10 @@ SWAP_ALL_FACES = os.getenv("SWAP_ALL_FACES", "false").lower() == "true"
 RETURN_BASE64_DEFAULT = os.getenv("RETURN_BASE64_DEFAULT", "true").lower() == "true"
 MAX_BASE64_RETURN_MB = int(os.getenv("MAX_BASE64_RETURN_MB", "80"))
 JPEG_SOURCE_QUALITY = int(os.getenv("JPEG_SOURCE_QUALITY", "95"))
+VIDEO_CRF = os.getenv("VIDEO_CRF", "20").strip() or "20"
+VIDEO_PRESET = os.getenv("VIDEO_PRESET", "veryfast").strip() or "veryfast"
+AUDIO_BITRATE = os.getenv("AUDIO_BITRATE", "128k").strip() or "128k"
+
 
 # R2 direct upload is optional. If configured, large MP4s can be returned as URL instead of base64.
 R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL", "").strip()
@@ -169,39 +173,168 @@ def _upload_to_r2(path: Path, content_type: str = "video/mp4") -> str:
     return f"{R2_PUBLIC_BASE_URL}/{key}"
 
 
-def _run_ffmpeg_mux_audio(raw_video_path: Path, source_video_path: Path, final_video_path: Path) -> bool:
-    if not PRESERVE_AUDIO:
-        return False
-
+def _get_ffmpeg_exe() -> Optional[str]:
     ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg:
+        return ffmpeg
+
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception as error:
+        print(f"[WARN] imageio_ffmpeg indisponível: {error}")
+        return None
+
+
+def _run_command(command) -> Tuple[bool, str]:
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    output = (result.stdout or "") + "\n" + (result.stderr or "")
+    return result.returncode == 0, output[-2000:]
+
+
+def _run_ffmpeg_finalize(raw_video_path: Path, source_video_path: Path, final_video_path: Path, fps: float) -> bool:
+    """
+    Reempacota/reencoda o vídeo bruto do OpenCV para um MP4 realmente tocável no navegador.
+
+    O OpenCV VideoWriter pode gerar arquivos .mp4 que têm frames, mas ficam com metadata/duração
+    ruim em alguns browsers/R2. Por isso o worker sempre tenta normalizar com ffmpeg:
+    - H.264
+    - yuv420p
+    - movflags +faststart
+    - PTS/fps coerentes
+    - áudio opcional do vídeo base
+    """
+    ffmpeg = _get_ffmpeg_exe()
     if not ffmpeg:
+        print("[WARN] ffmpeg não encontrado; usando vídeo bruto do OpenCV.")
         return False
 
-    command = [
+    fps_value = max(float(fps or 24.0), 1.0)
+    fps_text = f"{fps_value:.3f}"
+
+    base_command = [
         ffmpeg,
         "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-fflags",
+        "+genpts",
+        "-r",
+        fps_text,
         "-i",
         str(raw_video_path),
         "-i",
         str(source_video_path),
         "-map",
         "0:v:0",
-        "-map",
-        "1:a:0?",
-        "-c:v",
-        "copy",
-        "-c:a",
-        "aac",
-        "-shortest",
-        str(final_video_path),
     ]
 
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if result.returncode != 0:
-        print(f"[WARN] ffmpeg mux falhou; usando vídeo sem áudio. stderr={result.stderr[-1000:]}")
+    if PRESERVE_AUDIO:
+        base_command += ["-map", "1:a:0?"]
+
+    h264_command = base_command + [
+        "-c:v",
+        "libx264",
+        "-preset",
+        VIDEO_PRESET,
+        "-crf",
+        VIDEO_CRF,
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        fps_text,
+        "-movflags",
+        "+faststart",
+    ]
+
+    if PRESERVE_AUDIO:
+        h264_command += ["-c:a", "aac", "-b:a", AUDIO_BITRATE, "-shortest"]
+    else:
+        h264_command += ["-an"]
+
+    h264_command += [str(final_video_path)]
+
+    ok, output = _run_command(h264_command)
+    if ok and final_video_path.exists() and final_video_path.stat().st_size > 0:
+        return True
+
+    print(f"[WARN] ffmpeg h264 falhou; tentando fallback mpeg4. stderr={output}")
+
+    fallback_command = base_command + [
+        "-c:v",
+        "mpeg4",
+        "-q:v",
+        "4",
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        fps_text,
+        "-movflags",
+        "+faststart",
+    ]
+
+    if PRESERVE_AUDIO:
+        fallback_command += ["-c:a", "aac", "-b:a", AUDIO_BITRATE, "-shortest"]
+    else:
+        fallback_command += ["-an"]
+
+    fallback_command += [str(final_video_path)]
+
+    ok, output = _run_command(fallback_command)
+    if not ok:
+        print(f"[WARN] ffmpeg fallback falhou; usando vídeo bruto. stderr={output}")
         return False
 
     return final_video_path.exists() and final_video_path.stat().st_size > 0
+
+
+def _probe_video_with_cv(video_path: Path) -> Dict[str, Any]:
+    capture = cv2.VideoCapture(str(video_path))
+    if not capture.isOpened():
+        raise RuntimeError(f"Vídeo final inválido: OpenCV não conseguiu abrir {video_path.name}.")
+
+    fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
+    frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    capture.release()
+
+    duration_seconds = frames / fps if fps > 0 and frames > 0 else 0
+
+    if frames <= 0 or duration_seconds <= 0:
+        raise RuntimeError(
+            f"Vídeo final com duração inválida. frames={frames}, fps={fps:.3f}, duration={duration_seconds:.3f}s"
+        )
+
+    return {
+        "width": width,
+        "height": height,
+        "fps": fps,
+        "frames": frames,
+        "duration_seconds": duration_seconds,
+    }
+
+
+def _create_intermediate_writer(work_dir: Path, fps: float, width: int, height: int):
+    """
+    Usa AVI/MJPG como intermediário preferencial.
+    É mais confiável que escrever MP4 direto pelo OpenCV e depois facilita a normalização via ffmpeg.
+    """
+    candidates = [
+        (work_dir / "faceswap_raw.avi", "MJPG"),
+        (work_dir / "faceswap_raw.mp4", "mp4v"),
+    ]
+
+    for path, codec in candidates:
+        writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*codec), fps, (width, height))
+        if writer.isOpened():
+            print(f"[JOB] intermediate writer codec={codec} path={path.name}")
+            return writer, path, codec
+        writer.release()
+
+    raise RuntimeError("Não foi possível inicializar VideoWriter intermediário.")
 
 
 # -----------------------------
@@ -277,14 +410,13 @@ def _faceswap_video(source_image_path: Path, target_video_path: Path, work_dir: 
     frame_limit_candidates = [value for value in [MAX_FRAMES, frame_limit_by_seconds, total_frames] if value and value > 0]
     frame_limit = min(frame_limit_candidates) if frame_limit_candidates else 0
 
-    raw_output_path = work_dir / "faceswap_raw.mp4"
     final_output_path = work_dir / "faceswap_final.mp4"
 
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(raw_output_path), fourcc, fps, (width, height))
-    if not writer.isOpened():
+    try:
+        writer, raw_output_path, raw_codec = _create_intermediate_writer(work_dir, fps, width, height)
+    except Exception:
         capture.release()
-        raise RuntimeError("Não foi possível inicializar VideoWriter mp4v.")
+        raise
 
     processed_frames = 0
     swapped_frames = 0
@@ -329,15 +461,18 @@ def _faceswap_video(source_image_path: Path, target_video_path: Path, work_dir: 
     if not raw_output_path.exists() or raw_output_path.stat().st_size <= 0:
         raise RuntimeError("Arquivo MP4 bruto não foi gerado.")
 
-    if _run_ffmpeg_mux_audio(raw_output_path, target_video_path, final_output_path):
+    if _run_ffmpeg_finalize(raw_output_path, target_video_path, final_output_path, fps):
         output_path = final_output_path
     else:
         output_path = raw_output_path
 
+    final_probe = _probe_video_with_cv(output_path)
     elapsed_ms = _now_ms() - started_at
     print(
         f"[JOB] faceswap completed elapsed_ms={elapsed_ms} frames={processed_frames} "
-        f"swapped_frames={swapped_frames} output_mb={output_path.stat().st_size / 1024 / 1024:.2f}"
+        f"swapped_frames={swapped_frames} output_mb={output_path.stat().st_size / 1024 / 1024:.2f} "
+        f"final_fps={final_probe['fps']:.2f} final_frames={final_probe['frames']} "
+        f"duration={final_probe['duration_seconds']:.2f}s"
     )
 
     return output_path
