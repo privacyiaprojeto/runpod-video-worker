@@ -32,5 +32,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/runpod-video-worker:0.1.0
+          tags: |
+            ghcr.io/privacyiaprojeto/runpod-video-worker:0.1.1
+            ghcr.io/privacyiaprojeto/runpod-video-worker:latest
           provenance: false
