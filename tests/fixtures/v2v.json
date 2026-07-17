@@ -1,17 +1,17 @@
 {
-  "id": "runpod-test-i2v",
+  "id": "runpod-test-v2v",
   "input": {
     "contract_version": "privacy-production-spec-v1",
-    "engine": "wan-2.1-i2v",
-    "task": "video.i2v",
-    "request_id": "req-i2v-001",
+    "engine": "wan-2.1-v2v",
+    "task": "video.v2v",
+    "request_id": "req-v2v-001",
     "prompt": {
-      "positive": "cinematic portrait, natural movement, consistent adult identity",
-      "negative": "low quality, distorted anatomy, duplicate subject"
+      "positive": "cinematic scene, coherent motion, consistent adult identity",
+      "negative": "low quality, flicker, warped face, duplicate subject"
     },
     "comfyui": {
       "adapter": "comfyui-graph-contract-v1",
-      "workflow_id": "wan-2.1-i2v-v1",
+      "workflow_id": "wan-2.1-v2v-v1",
       "workflow_version": "1",
       "graph": null,
       "input_bindings": {}
@@ -24,7 +24,8 @@
       "qa_required": true
     },
     "conditioning": {
-      "source_image_url": "https://media.example.test/private/kyc-front.png"
+      "base_video_url": "https://media.example.test/private/base-scene.mp4",
+      "source_image_url": "https://unapproved.example.test/not-used.png"
     },
     "identity": {
       "source": "approved_mapping_vault",
@@ -34,27 +35,27 @@
           "slot_index": 1,
           "participant_type": "actor",
           "actor_profile_id": "00000000-0000-4000-8000-000000000001",
-          "primary_reference_url": "https://media.example.test/private/kyc-front.png",
+          "primary_reference_url": "https://media.example.test/private/kyc-close.png",
           "references": [
             {
-              "asset_id": "00000000-0000-4000-8000-000000000101",
-              "system_tag": "face_front",
+              "asset_id": "00000000-0000-4000-8000-000000000102",
+              "system_tag": "nsfw_closeup_front",
               "media_type": "image",
               "content_type": "image/png",
-              "signed_url": "https://media.example.test/private/kyc-front.png"
+              "signed_url": "https://media.example.test/private/kyc-close.png"
             }
           ],
           "reference_source": "approved_mapping_vault"
         }
       ]
     },
-    "sampling": {"steps": 28, "guidance_scale": 5.5, "seed": 42},
+    "sampling": {"steps": 30, "guidance_scale": 5, "seed": 99},
     "output": {
       "format": "mp4",
-      "width": 833,
-      "height": 481,
+      "width": 832,
+      "height": 480,
       "fps": 16,
-      "frames": 50,
+      "frames": 82,
       "private_storage": true,
       "initial_status": "qa_pending"
     }

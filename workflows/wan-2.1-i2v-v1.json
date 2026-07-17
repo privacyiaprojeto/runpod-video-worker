@@ -1,0 +1,126 @@
+{
+  "schema_version": "privacy-comfyui-workflow-v1",
+  "engine": "wan-2.1-i2v",
+  "workflow_version": "1",
+  "description": "Wan 2.1 native Image-to-Video workflow using an approved identity reference.",
+  "prompt": {
+    "3": {
+      "inputs": {
+        "seed": 1,
+        "steps": 30,
+        "cfg": 5.0,
+        "sampler_name": "uni_pc",
+        "scheduler": "simple",
+        "denoise": 1.0,
+        "model": ["37", 0],
+        "positive": ["51", 0],
+        "negative": ["51", 1],
+        "latent_image": ["51", 2]
+      },
+      "class_type": "KSampler",
+      "_meta": {"title": "Wan Sampler"}
+    },
+    "6": {
+      "inputs": {"text": "", "clip": ["38", 0]},
+      "class_type": "CLIPTextEncode",
+      "_meta": {"title": "Positive Prompt"}
+    },
+    "7": {
+      "inputs": {"text": "", "clip": ["38", 0]},
+      "class_type": "CLIPTextEncode",
+      "_meta": {"title": "Negative Prompt"}
+    },
+    "8": {
+      "inputs": {"samples": ["3", 0], "vae": ["39", 0]},
+      "class_type": "VAEDecode",
+      "_meta": {"title": "Decode Video Frames"}
+    },
+    "28": {
+      "inputs": {
+        "frame_rate": 16,
+        "loop_count": 0,
+        "filename_prefix": "privacy/wan-i2v",
+        "format": "video/h264-mp4",
+        "pingpong": false,
+        "save_output": true,
+        "images": ["8", 0]
+      },
+      "class_type": "VHS_VideoCombine",
+      "_meta": {"title": "Save MP4"}
+    },
+    "37": {
+      "inputs": {
+        "unet_name": "wan2.1_i2v_480p_14B_fp16.safetensors",
+        "weight_dtype": "default"
+      },
+      "class_type": "UNETLoader",
+      "_meta": {"title": "Load Wan I2V Model"}
+    },
+    "38": {
+      "inputs": {
+        "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "type": "wan",
+        "device": "default"
+      },
+      "class_type": "CLIPLoader",
+      "_meta": {"title": "Load Wan Text Encoder"}
+    },
+    "39": {
+      "inputs": {"vae_name": "wan_2.1_vae.safetensors"},
+      "class_type": "VAELoader",
+      "_meta": {"title": "Load Wan VAE"}
+    },
+    "51": {
+      "inputs": {
+        "width": 832,
+        "height": 480,
+        "length": 49,
+        "batch_size": 1,
+        "positive": ["6", 0],
+        "negative": ["7", 0],
+        "vae": ["39", 0],
+        "clip_vision_output": ["52", 0],
+        "start_image": ["54", 0]
+      },
+      "class_type": "WanImageToVideo",
+      "_meta": {"title": "Wan Image To Video"}
+    },
+    "52": {
+      "inputs": {
+        "crop": "none",
+        "clip_vision": ["53", 0],
+        "image": ["54", 0]
+      },
+      "class_type": "CLIPVisionEncode",
+      "_meta": {"title": "Encode Identity Reference"}
+    },
+    "53": {
+      "inputs": {"clip_name": "clip_vision_h.safetensors"},
+      "class_type": "CLIPVisionLoader",
+      "_meta": {"title": "Load CLIP Vision"}
+    },
+    "54": {
+      "inputs": {"image": "identity_reference.png"},
+      "class_type": "LoadImage",
+      "_meta": {"title": "Approved KYC Reference"}
+    }
+  },
+  "bindings": {
+    "positive_prompt": {"node_id": "6", "input": "text"},
+    "negative_prompt": {"node_id": "7", "input": "text"},
+    "source_image": {"node_id": "54", "input": "image"},
+    "width": {"node_id": "51", "input": "width"},
+    "height": {"node_id": "51", "input": "height"},
+    "frames": {"node_id": "51", "input": "length"},
+    "fps": {"node_id": "28", "input": "frame_rate"},
+    "steps": {"node_id": "3", "input": "steps"},
+    "cfg": {"node_id": "3", "input": "cfg"},
+    "seed": {"node_id": "3", "input": "seed"},
+    "filename_prefix": {"node_id": "28", "input": "filename_prefix"},
+    "i2v_model_name": {"node_id": "37", "input": "unet_name"},
+    "text_encoder_name": {"node_id": "38", "input": "clip_name"},
+    "vae_name": {"node_id": "39", "input": "vae_name"},
+    "clip_vision_name": {"node_id": "53", "input": "clip_name"}
+  },
+  "output_nodes": ["28"]
+}

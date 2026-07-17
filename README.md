@@ -1,125 +1,144 @@
-# runpod-video-worker
+# Privacy IA — RunPod Wan 2.1 / ComfyUI Video Worker
 
-Worker Serverless RunPod para prova técnica do pipeline de vídeo / FaceSwap.
+Worker Serverless de vídeo para o contrato canônico `privacy-production-spec-v1`.
 
-Fluxo:
+## Escopo do Pivot Stage 2
 
-```txt
-source_image_url + target_video_url
-→ download
-→ InsightFace FaceAnalysis + INSwapper
-→ processamento frame a frame
-→ MP4 final
-→ retorno base64 ou URL R2 opcional
+O runtime anterior foi substituído por uma arquitetura ComfyUI headless, com workflows versionados para:
+
+- `wan-2.1-i2v` — imagem aprovada do Cofre KYC para vídeo;
+- `wan-2.1-v2v` — vídeo base privado + imagem aprovada do Cofre KYC;
+- saída privada, obrigatoriamente marcada como `qa_required`;
+- nenhum upload público persistente;
+- telemetria estruturada em JSON;
+- testes locais sem GPU.
+
+## Fluxo
+
+```text
+privacy-production-spec-v1
+  → validação fail-closed do contrato e das flags de segurança
+  → seleção da referência aprovada em identity.actors[].references
+  → download temporário por URL assinada
+  → injeção nos nós do workflow ComfyUI
+  → execução Wan 2.1
+  → MP4 privado em base64 ou R2 privado
+  → backend registra Master em qa_pending
 ```
 
-## Segurança operacional
+## Workflows versionados
 
-Use apenas assets licenciados/consentidos. O worker exige `safety_mode=licensed_or_consented_assets_only` ou `consent_confirmed=true` no payload.
-
-## Arquivos
-
-```txt
-Dockerfile
-handler.py
-requirements.txt
-test_input.json
-.dockerignore
+```text
+workflows/wan-2.1-i2v-v1.json
+workflows/wan-2.1-v2v-v1.json
 ```
 
-## Modelo necessário
+Cada arquivo é um envelope `privacy-comfyui-workflow-v1` contendo:
 
-Coloque o modelo de FaceSwap em:
+- `prompt`: grafo no API format do ComfyUI;
+- `bindings`: mapa entre o contrato do backend e os inputs dos nós;
+- `output_nodes`: nós que publicam o MP4;
+- `engine` e `workflow_version`.
 
-```txt
-/runpod-volume/models/inswapper_128.onnx
+O backend pode fornecer `comfyui.graph` para substituir o grafo em uma futura versão, mantendo os bindings empacotados ou enviando bindings próprios no envelope.
+
+## Modelos no RunPod Network Volume
+
+Os pesos não são incluídos na imagem Docker. Monte um Network Volume em `/runpod-volume` e disponibilize:
+
+```text
+/runpod-volume/models/
+├── diffusion_models/
+│   ├── wan2.1_i2v_480p_14B_fp16.safetensors
+│   └── wan2.1_vace_14B_fp16.safetensors
+├── text_encoders/
+│   └── umt5_xxl_fp8_e4m3fn_scaled.safetensors
+├── vae/
+│   └── wan_2.1_vae.safetensors
+└── clip_vision/
+    └── clip_vision_h.safetensors
 ```
 
-ou configure:
+Os nomes podem ser alterados por variáveis de ambiente. O worker falha com mensagem clara caso algum modelo obrigatório esteja ausente.
+
+## Segurança de entrada
+
+- aceita somente `http`/`https`;
+- bloqueia IPs privados, loopback, link-local e reservados;
+- revalida cada redirecionamento;
+- permite allowlist por `MEDIA_ALLOWED_HOSTS`;
+- limita tamanho de imagens, vídeos e saída;
+- a imagem de identidade precisa existir em `identity.actors[].references`;
+- ignora `conditioning.source_image_url` quando não corresponde a uma referência aprovada;
+- exige todas as flags de segurança do contrato como `true`.
+
+Em produção, configure `MEDIA_ALLOWED_HOSTS` com os hosts oficiais usados pelas Signed URLs do R2.
+
+## Saída privada
+
+Modo recomendado:
 
 ```env
-SWAPPER_MODEL_URL=https://sua-url-privada/inswapper_128.onnx
+OUTPUT_MODE=private_r2
 ```
 
-Para uso comercial, valide a licença do modelo/ferramenta escolhido.
+O objeto é enviado com cache privado e o worker retorna uma Signed URL curta, `r2_bucket` e `r2_key`. Não existe suporte a URL pública persistente.
 
-## Variáveis principais
-
-```env
-MODEL_DIR=/runpod-volume/models
-SWAPPER_MODEL_PATH=/runpod-volume/models/inswapper_128.onnx
-SWAPPER_MODEL_URL=
-DEFAULT_MAX_SECONDS=12
-MAX_DOWNLOAD_MB=300
-MAX_BASE64_RETURN_MB=80
-PRESERVE_AUDIO=true
-SWAP_ALL_FACES=false
-RETURN_BASE64_DEFAULT=true
-```
-
-## R2 opcional no worker
-
-O backend já consegue receber base64 e salvar no R2. Para vídeos maiores, você pode fazer upload direto no worker:
-
-```env
-R2_ENDPOINT_URL=https://<account_id>.r2.cloudflarestorage.com
-R2_ACCESS_KEY_ID=
-R2_SECRET_ACCESS_KEY=
-R2_BUCKET_NAME=
-R2_PUBLIC_BASE_URL=https://seu-dominio-r2.com
-R2_PREFIX=faceswap/tmp
-```
-
-## Build local
+## Build
 
 ```bash
-docker build -t runpod-video-worker:0.1.0 .
+docker build -t runpod-video-worker:2.0.0 .
 ```
 
-## Build e push para GHCR
+A imagem instala:
+
+- PyTorch/CUDA;
+- ComfyUI headless;
+- ComfyUI-VideoHelperSuite;
+- FFmpeg e FFprobe;
+- SDK RunPod;
+- adaptador canônico do Privacy IA.
+
+Os argumentos `COMFYUI_REF` e `VIDEO_HELPER_REF` permitem fixar revisões homologadas:
 
 ```bash
-docker build -t ghcr.io/SEU_USUARIO/runpod-video-worker:0.1.0 .
-docker push ghcr.io/SEU_USUARIO/runpod-video-worker:0.1.0
+docker build \
+  --build-arg COMFYUI_REF=v0.27.0 \
+  --build-arg VIDEO_HELPER_REF=main \
+  -t runpod-video-worker:2.0.0 .
 ```
 
-## Payload de teste
+Após o primeiro smoke de GPU aprovado, substitua `VIDEO_HELPER_REF=main` pelo commit exato homologado.
 
-```json
-{
-  "input": {
-    "source_image_url": "https://seu-r2/avatar-sofia.jpg",
-    "target_video_url": "https://seu-r2/video-base-curto.mp4",
-    "safety_mode": "licensed_or_consented_assets_only",
-    "max_seconds": 8,
-    "return_base64": true
-  }
-}
+## Testes sem GPU
+
+```bash
+python -m pip install -r requirements-dev.txt
+python scripts/validate_workflows.py
+python -m pytest
 ```
 
-## Resposta esperada
+Os testes comprovam:
 
-Base64:
+- parsing I2V e V2V do contrato canônico;
+- exigência das referências aprovadas;
+- normalização de dimensões e frames Wan;
+- injeção de prompt, KYC, vídeo base, FPS e sampling nos workflows;
+- execução mockada do `handler.py` sem ComfyUI/GPU;
+- ausência das dependências e contratos do runtime anterior.
 
-```json
-{
-  "video_base64": "...",
-  "mime_type": "video/mp4",
-  "extension": "mp4",
-  "size_bytes": 123456,
-  "elapsed_ms": 45000
-}
+## Payloads de teste
+
+```text
+test_input.json       # I2V
+test_input_v2v.json   # V2V
 ```
 
-ou URL R2:
+As URLs são exemplos e não são baixadas nos testes unitários.
 
-```json
-{
-  "video_url": "https://.../faceswap/tmp/file.mp4",
-  "url": "https://.../faceswap/tmp/file.mp4",
-  "mime_type": "video/mp4",
-  "extension": "mp4",
-  "size_bytes": 123456,
-  "elapsed_ms": 45000
-}
-```
+## Limites conhecidos antes do smoke real
+
+- os testes locais não carregam pesos nem executam CUDA;
+- os nomes e inputs de custom nodes devem ser confirmados no build/smoke da imagem final;
+- o workflow V2V v1 processa um ator principal por job e falha de forma controlada quando o contrato não oferece referência aprovada;
+- produção real permanece bloqueada no backend até o endpoint RunPod ser atualizado e as flags serem habilitadas de forma controlada.
