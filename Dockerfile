@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+ARG BASE_IMAGE=pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
 FROM ${BASE_IMAGE}
 
 ARG COMFYUI_REF=v0.27.0
@@ -35,7 +35,10 @@ RUN set -eux; \
     git clone --filter=blob:none https://github.com/Comfy-Org/ComfyUI.git /opt/ComfyUI; \
     git -C /opt/ComfyUI checkout "${COMFYUI_REF}"; \
     python -m pip install --upgrade pip setuptools wheel; \
-    python -m pip install --no-cache-dir -r /opt/ComfyUI/requirements.txt
+    grep -Ev '^(torch|torchvision|torchaudio)([<>=!~].*)?$' /opt/ComfyUI/requirements.txt > /tmp/comfyui-requirements-no-torch.txt; \
+    python -m pip install --no-cache-dir -r /tmp/comfyui-requirements-no-torch.txt; \
+    python -m pip install --no-cache-dir torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128; \
+    python -c "import torch, torchvision, torchaudio; flags = getattr(torch._C, '_cuda_getArchFlags', lambda: '')() or ''; assert torch.__version__.startswith('2.8.0'), torch.__version__; assert torch.version.cuda == '12.8', torch.version.cuda; assert torchvision.__version__.startswith('0.23.0'), torchvision.__version__; assert torchaudio.__version__.startswith('2.8.0'), torchaudio.__version__; assert 'sm_120' in flags, flags; print('PYTORCH_BLACKWELL_RUNTIME_READY', torch.__version__, torch.version.cuda, flags)"
 
 RUN set -eux; \
     mkdir -p /opt/ComfyUI/custom_nodes; \
