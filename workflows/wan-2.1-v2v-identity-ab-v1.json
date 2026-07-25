@@ -1,0 +1,417 @@
+{
+  "schema_version": "privacy-comfyui-workflow-v1",
+  "engine": "wan-2.1-v2v",
+  "workflow_version": "1",
+  "description": "Neutral one-job A/B identity QA: same private motion, seed and sampling; B injects a DiT LoRA through LoraLoaderModelOnly.",
+  "prompt": {
+    "1": {
+      "inputs": {
+        "unet_name": "wan2.1_vace_14B_fp16.safetensors",
+        "weight_dtype": "default"
+      },
+      "class_type": "UNETLoader",
+      "_meta": {
+        "title": "Load Wan VACE Model"
+      }
+    },
+    "2": {
+      "inputs": {
+        "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "type": "wan",
+        "device": "default"
+      },
+      "class_type": "CLIPLoader",
+      "_meta": {
+        "title": "Load Wan Text Encoder"
+      }
+    },
+    "3": {
+      "inputs": {
+        "vae_name": "wan_2.1_vae.safetensors"
+      },
+      "class_type": "VAELoader",
+      "_meta": {
+        "title": "Load Wan VAE"
+      }
+    },
+    "4": {
+      "inputs": {
+        "text": "",
+        "clip": [
+          "2",
+          0
+        ]
+      },
+      "class_type": "CLIPTextEncode",
+      "_meta": {
+        "title": "Neutral Positive Prompt"
+      }
+    },
+    "5": {
+      "inputs": {
+        "text": "",
+        "clip": [
+          "2",
+          0
+        ]
+      },
+      "class_type": "CLIPTextEncode",
+      "_meta": {
+        "title": "Negative Prompt"
+      }
+    },
+    "6": {
+      "inputs": {
+        "video": "neutral-motion-01.mp4",
+        "force_rate": 16,
+        "force_size": "Custom",
+        "custom_width": 832,
+        "custom_height": 480,
+        "frame_load_cap": 17,
+        "skip_first_frames": 0,
+        "select_every_nth": 1
+      },
+      "class_type": "VHS_LoadVideo",
+      "_meta": {
+        "title": "Private Neutral Motion"
+      }
+    },
+    "7": {
+      "inputs": {
+        "image": [
+          "6",
+          0
+        ],
+        "batch_index": 0,
+        "length": 1
+      },
+      "class_type": "ImageFromBatch",
+      "_meta": {
+        "title": "Neutral First Frame Reference"
+      }
+    },
+    "8": {
+      "inputs": {
+        "width": 832,
+        "height": 480,
+        "length": 17,
+        "batch_size": 1,
+        "strength": 1.0,
+        "positive": [
+          "4",
+          0
+        ],
+        "negative": [
+          "5",
+          0
+        ],
+        "vae": [
+          "3",
+          0
+        ],
+        "control_video": [
+          "6",
+          0
+        ],
+        "reference_image": [
+          "7",
+          0
+        ]
+      },
+      "class_type": "WanVaceToVideo",
+      "_meta": {
+        "title": "Frozen VACE Motion Guide"
+      }
+    },
+    "9": {
+      "inputs": {
+        "seed": 99,
+        "steps": 30,
+        "cfg": 5.0,
+        "sampler_name": "uni_pc",
+        "scheduler": "simple",
+        "denoise": 1.0,
+        "model": [
+          "1",
+          0
+        ],
+        "positive": [
+          "8",
+          0
+        ],
+        "negative": [
+          "8",
+          1
+        ],
+        "latent_image": [
+          "8",
+          2
+        ]
+      },
+      "class_type": "KSampler",
+      "_meta": {
+        "title": "A - Same Seed Without LoRA"
+      }
+    },
+    "10": {
+      "inputs": {
+        "samples": [
+          "9",
+          0
+        ],
+        "trim_amount": [
+          "8",
+          3
+        ]
+      },
+      "class_type": "TrimVideoLatent",
+      "_meta": {
+        "title": "Trim A"
+      }
+    },
+    "11": {
+      "inputs": {
+        "samples": [
+          "10",
+          0
+        ],
+        "vae": [
+          "3",
+          0
+        ]
+      },
+      "class_type": "VAEDecode",
+      "_meta": {
+        "title": "Decode A"
+      }
+    },
+    "12": {
+      "inputs": {
+        "frame_rate": 16,
+        "loop_count": 0,
+        "filename_prefix": "privacy/identity-ab/A",
+        "format": "video/h264-mp4",
+        "pingpong": false,
+        "save_output": true,
+        "images": [
+          "11",
+          0
+        ]
+      },
+      "class_type": "VHS_VideoCombine",
+      "_meta": {
+        "title": "Save A Without LoRA"
+      }
+    },
+    "13": {
+      "inputs": {
+        "model": [
+          "1",
+          0
+        ],
+        "lora_name": "identity.safetensors",
+        "strength_model": 0.65
+      },
+      "class_type": "LoraLoaderModelOnly",
+      "_meta": {
+        "title": "B - DiT LoRA 0.65"
+      }
+    },
+    "14": {
+      "inputs": {
+        "seed": 99,
+        "steps": 30,
+        "cfg": 5.0,
+        "sampler_name": "uni_pc",
+        "scheduler": "simple",
+        "denoise": 1.0,
+        "model": [
+          "13",
+          0
+        ],
+        "positive": [
+          "8",
+          0
+        ],
+        "negative": [
+          "8",
+          1
+        ],
+        "latent_image": [
+          "8",
+          2
+        ]
+      },
+      "class_type": "KSampler",
+      "_meta": {
+        "title": "B - Same Seed With LoRA"
+      }
+    },
+    "15": {
+      "inputs": {
+        "samples": [
+          "14",
+          0
+        ],
+        "trim_amount": [
+          "8",
+          3
+        ]
+      },
+      "class_type": "TrimVideoLatent",
+      "_meta": {
+        "title": "Trim B"
+      }
+    },
+    "16": {
+      "inputs": {
+        "samples": [
+          "15",
+          0
+        ],
+        "vae": [
+          "3",
+          0
+        ]
+      },
+      "class_type": "VAEDecode",
+      "_meta": {
+        "title": "Decode B"
+      }
+    },
+    "17": {
+      "inputs": {
+        "frame_rate": 16,
+        "loop_count": 0,
+        "filename_prefix": "privacy/identity-ab/B",
+        "format": "video/h264-mp4",
+        "pingpong": false,
+        "save_output": true,
+        "images": [
+          "16",
+          0
+        ]
+      },
+      "class_type": "VHS_VideoCombine",
+      "_meta": {
+        "title": "Save B With LoRA"
+      }
+    }
+  },
+  "bindings": {
+    "positive_prompt": {
+      "node_id": "4",
+      "input": "text"
+    },
+    "negative_prompt": {
+      "node_id": "5",
+      "input": "text"
+    },
+    "base_video": {
+      "node_id": "6",
+      "input": "video"
+    },
+    "width": [
+      {
+        "node_id": "6",
+        "input": "custom_width"
+      },
+      {
+        "node_id": "8",
+        "input": "width"
+      }
+    ],
+    "height": [
+      {
+        "node_id": "6",
+        "input": "custom_height"
+      },
+      {
+        "node_id": "8",
+        "input": "height"
+      }
+    ],
+    "frames": [
+      {
+        "node_id": "6",
+        "input": "frame_load_cap"
+      },
+      {
+        "node_id": "8",
+        "input": "length"
+      }
+    ],
+    "fps": [
+      {
+        "node_id": "6",
+        "input": "force_rate"
+      },
+      {
+        "node_id": "12",
+        "input": "frame_rate"
+      },
+      {
+        "node_id": "17",
+        "input": "frame_rate"
+      }
+    ],
+    "steps": [
+      {
+        "node_id": "9",
+        "input": "steps"
+      },
+      {
+        "node_id": "14",
+        "input": "steps"
+      }
+    ],
+    "cfg": [
+      {
+        "node_id": "9",
+        "input": "cfg"
+      },
+      {
+        "node_id": "14",
+        "input": "cfg"
+      }
+    ],
+    "seed": [
+      {
+        "node_id": "9",
+        "input": "seed"
+      },
+      {
+        "node_id": "14",
+        "input": "seed"
+      }
+    ],
+    "filename_prefix_a": {
+      "node_id": "12",
+      "input": "filename_prefix"
+    },
+    "filename_prefix_b": {
+      "node_id": "17",
+      "input": "filename_prefix"
+    },
+    "lora_name": {
+      "node_id": "13",
+      "input": "lora_name"
+    },
+    "v2v_model_name": {
+      "node_id": "1",
+      "input": "unet_name"
+    },
+    "text_encoder_name": {
+      "node_id": "2",
+      "input": "clip_name"
+    },
+    "vae_name": {
+      "node_id": "3",
+      "input": "vae_name"
+    }
+  },
+  "output_nodes": [
+    "12",
+    "17"
+  ]
+}

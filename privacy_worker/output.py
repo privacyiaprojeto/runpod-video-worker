@@ -84,3 +84,20 @@ def publish_output(path: Path, settings: Settings, request_id: str) -> dict:
         "private_output_only": True,
         "qa_required": True,
     }
+
+
+def publish_private_named_output(path: Path, settings: Settings, request_id: str, asset_key: str, contract: str) -> dict:
+    if not settings.r2_configured:
+        raise OutputError("O A/B exige armazenamento R2 privado.")
+    client = boto3.client(
+        "s3", endpoint_url=settings.r2_endpoint_url, aws_access_key_id=settings.r2_access_key_id,
+        aws_secret_access_key=settings.r2_secret_access_key, region_name="auto",
+    )
+    key = f"{settings.r2_prefix}/{request_id}/{asset_key}-{uuid.uuid4().hex}.mp4"
+    try:
+        with path.open("rb") as body:
+            client.put_object(Bucket=settings.r2_bucket_name, Key=key, Body=body, ContentType="video/mp4", CacheControl="private, no-store", Metadata={"private":"true","qa_required":"true","contract":contract,"asset_key":asset_key})
+    except Exception as error:
+        raise OutputError("Falha ao enviar evidência A/B privada ao R2.") from error
+    import hashlib
+    return {"r2_bucket": settings.r2_bucket_name, "r2_key": key, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "byte_size": path.stat().st_size, "content_type": "video/mp4", "storage_private": True}

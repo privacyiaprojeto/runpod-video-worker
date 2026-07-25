@@ -94,6 +94,7 @@ def prepare_workflow(
     base_video_filename: str | None,
     output_prefix: str,
     settings: Settings,
+    lora_filename: str | None = None,
 ) -> PreparedWorkflow:
     path = settings.workflow_root / f"{request.workflow_id}.json"
     if not path.exists():
@@ -125,6 +126,9 @@ def prepare_workflow(
         "cfg": request.guidance_scale,
         "seed": request.seed,
         "filename_prefix": output_prefix,
+        "filename_prefix_a": f"{output_prefix}/A_without_lora",
+        "filename_prefix_b": f"{output_prefix}/B_with_lora",
+        "lora_name": lora_filename,
         "i2v_model_name": settings.i2v_model_name,
         "v2v_model_name": settings.v2v_model_name,
         "text_encoder_name": settings.text_encoder_name,

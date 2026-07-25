@@ -187,9 +187,9 @@ class ComfyUIClient:
         raise ComfyUIError("Timeout aguardando conclusão do workflow ComfyUI.")
 
     @staticmethod
-    def _candidate_entries(record: dict[str, Any], output_nodes: tuple[str, ...]):
+    def _candidate_entries(record: dict[str, Any], output_nodes: tuple[str, ...], strict_output_nodes: bool = False):
         outputs = record.get("outputs") or {}
-        ordered_nodes = list(output_nodes) + [key for key in outputs if key not in output_nodes]
+        ordered_nodes = list(output_nodes) if strict_output_nodes else list(output_nodes) + [key for key in outputs if key not in output_nodes]
         for node_id in ordered_nodes:
             node_output = outputs.get(node_id) or {}
             for field in ("gifs", "videos", "images"):
@@ -205,8 +205,9 @@ class ComfyUIClient:
         output_nodes: tuple[str, ...],
         destination: Path,
         request_id: str,
+        strict_output_nodes: bool = False,
     ) -> Path:
-        candidate = next(self._candidate_entries(record, output_nodes), None)
+        candidate = next(self._candidate_entries(record, output_nodes, strict_output_nodes), None)
         if not candidate:
             raise OutputError("O workflow terminou sem arquivo de vídeo reconhecível.")
         query = urlencode(
