@@ -32,3 +32,71 @@ def test_neutral_ab_contract_and_graph_are_exact():
     assert prepared.output_nodes == ("12","17")
     serialized=json.dumps(p).lower()
     assert "kyc" not in serialized
+
+def test_one_shot_lock_is_scoped_by_request_id(tmp_path):
+    from privacy_worker.identity_ab import reserve_one_shot
+
+    first_event = event()
+    first_event["input"]["request_id"] = "ab-request-001"
+    second_event = event()
+    second_event["input"]["request_id"] = "ab-request-002"
+
+    first = parse_identity_ab_request(first_event)
+    second = parse_identity_ab_request(second_event)
+    settings = replace(Settings(), runtime_root=tmp_path / "runtime")
+
+    first_path = reserve_one_shot(first, settings)
+    second_path = reserve_one_shot(second, settings)
+
+    assert first_path != second_path
+    assert first_path.exists()
+    assert second_path.exists()
+    assert first_path.parent == second_path.parent
+
+    first_payload = json.loads(first_path.read_text(encoding="utf-8"))
+    second_payload = json.loads(second_path.read_text(encoding="utf-8"))
+    assert first_payload["lock_version"] == 2
+    assert second_payload["lock_version"] == 2
+    assert first_payload["request_id"] == "ab-request-001"
+    assert second_payload["request_id"] == "ab-request-002"
+    assert first_payload["automatic_retry"] is False
+
+
+def test_same_request_id_is_still_fail_closed(tmp_path):
+    import pytest
+    from privacy_worker.errors import ContractError
+    from privacy_worker.identity_ab import reserve_one_shot
+
+    payload = event()
+    payload["input"]["request_id"] = "ab-request-duplicate"
+    request = parse_identity_ab_request(payload)
+    settings = replace(Settings(), runtime_root=tmp_path / "runtime")
+
+    reserve_one_shot(request, settings)
+    with pytest.raises(ContractError, match="request_id A/B já foi reservado"):
+        reserve_one_shot(request, settings)
+
+
+def test_legacy_adapter_scoped_lock_does_not_block_authorized_new_request(tmp_path):
+    from privacy_worker.identity_ab import reserve_one_shot
+
+    payload = event()
+    payload["input"]["request_id"] = "ab-request-after-legacy-lock"
+    request = parse_identity_ab_request(payload)
+    settings = replace(Settings(), runtime_root=tmp_path / "runtime")
+
+    legacy_root = settings.runtime_root / "identity-ab-locks"
+    legacy_root.mkdir(parents=True, exist_ok=True)
+    legacy_path = legacy_root / (
+        f"{request.actor_profile_id}_{request.training_run_id}_{request.adapter_id}.json"
+    )
+    legacy_path.write_text(
+        json.dumps({"request_id": "historical", "status": "completed"}),
+        encoding="utf-8",
+    )
+
+    new_path = reserve_one_shot(request, settings)
+
+    assert legacy_path.exists()
+    assert new_path.exists()
+    assert new_path != legacy_path

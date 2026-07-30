@@ -227,15 +227,49 @@ def read_runtime_lora_attestation(
     return payload
 
 
-def reserve_one_shot(request: IdentityAbRequest, settings: Settings) -> Path:
+def _safe_lock_component(value: str) -> str:
+    normalized = "".join(
+        char if char.isalnum() or char in "._-" else "_"
+        for char in str(value or "").strip()
+    )
+    if not normalized:
+        raise ContractError("Escopo inválido para a reserva A/B.")
+    return normalized[:160]
+
+
+def one_shot_lock_path(request: IdentityAbRequest, settings: Settings) -> Path:
     root = settings.runtime_root / "identity-ab-locks"
-    root.mkdir(parents=True, exist_ok=True)
-    path = root / f"{request.actor_profile_id}_{request.training_run_id}_{request.adapter_id}.json"
+    scope = (
+        root
+        / _safe_lock_component(request.actor_profile_id)
+        / _safe_lock_component(request.training_run_id)
+        / _safe_lock_component(request.adapter_id)
+    )
+    request_digest = hashlib.sha256(request.request_id.encode("utf-8")).hexdigest()
+    return scope / f"{request_digest}.json"
+
+
+def reserve_one_shot(request: IdentityAbRequest, settings: Settings) -> Path:
+    path = one_shot_lock_path(request, settings)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "lock_version": 2,
+        "request_id": request.request_id,
+        "actor_profile_id": request.actor_profile_id,
+        "training_run_id": request.training_run_id,
+        "adapter_id": request.adapter_id,
+        "contract_version": request.contract_version,
+        "status": "reserved",
+        "automatic_retry": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
     try:
         with path.open("x", encoding="utf-8") as handle:
-            json.dump({"request_id": request.request_id, "status": "reserved", "automatic_retry": False}, handle)
+            json.dump(payload, handle, indent=2)
     except FileExistsError as exc:
-        raise ContractError("O único teste A/B deste adapter já foi reservado.") from exc
+        raise ContractError(
+            "Este request_id A/B já foi reservado; repetição bloqueada."
+        ) from exc
     return path
 
 
