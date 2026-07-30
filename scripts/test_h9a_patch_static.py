@@ -20,6 +20,7 @@ def main() -> int:
     custom = read("custom_nodes/privacy_lora_attestation/nodes.py")
     docker = read("Dockerfile")
     requirements = read("requirements.txt")
+    requirements_dev = read("requirements-dev.txt")
     ci_workflow = read(".github/workflows/build.yml")
     workflow = json.loads(read("workflows/wan-2.1-v2v-identity-ab-v1.json"))
 
@@ -62,6 +63,7 @@ def main() -> int:
         "custom node copied into image": "custom_nodes/privacy_lora_attestation" in docker,
         "custom node compiled in image": "/opt/ComfyUI/custom_nodes/privacy_lora_attestation" in docker,
         "safetensors runtime dependency declared": "safetensors>=" in requirements,
+        "CI NumPy dependency pinned for safetensors tests": "numpy==2.1.3" in requirements_dev,
         "CI installs pinned CPU torch before pytest": (
             "Install CPU PyTorch for contract tests" in ci_workflow
             and "https://download.pytorch.org/whl/cpu" in ci_workflow
