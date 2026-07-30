@@ -27,6 +27,9 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
+      - name: Install CPU PyTorch for contract tests
+        run: python -m pip install --only-binary=:all: --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+
       - name: Install test dependencies
         run: python -m pip install -r requirements-dev.txt
 
