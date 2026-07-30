@@ -12,12 +12,23 @@ import runpod
 from privacy_worker.comfyui import ComfyUIClient, ComfyUIProcessManager
 from privacy_worker.config import settings
 from privacy_worker.contracts import parse_production_request
-from privacy_worker.identity_ab import CONTRACT_VERSION as IDENTITY_AB_CONTRACT_VERSION, download_private_ref, materialize_lora, parse_identity_ab_request, r2_client, reserve_one_shot, update_lock
+from privacy_worker.identity_ab import (
+    CONTRACT_VERSION as IDENTITY_AB_CONTRACT_VERSION,
+    download_private_ref,
+    materialize_lora,
+    parse_identity_ab_request,
+    r2_client,
+    read_runtime_lora_attestation,
+    reserve_one_shot,
+    runtime_attestation_path,
+    update_lock,
+)
 from privacy_worker.downloader import download_media
-from privacy_worker.errors import WorkerError
+from privacy_worker.errors import ComfyUIError, LoraCompatibilityError, LoraNotAppliedError, WorkerError
 from privacy_worker.models import validate_required_models
 from privacy_worker.output import publish_output, publish_private_named_output
 from privacy_worker.telemetry import log_event, now_ms
+from privacy_worker.visual_ab import compare_ab_videos
 from privacy_worker.workflows import prepare_workflow
 
 settings.ensure_runtime_dirs()
@@ -39,41 +50,176 @@ def _input_payload(event: dict[str, Any]) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _identity_comfy_failure(error: ComfyUIError) -> WorkerError | None:
+    serialized = str(error) + " " + str(getattr(error, "details", {}))
+    if "LORA_KEY_FORMAT_MISMATCH" in serialized:
+        return LoraCompatibilityError(
+            "O ComfyUI recusou o namespace ou os alvos da LoRA.",
+            details={"comfyui": getattr(error, "details", {})},
+        )
+    if "LORA_NOT_APPLIED" in serialized:
+        return LoraNotAppliedError(
+            "O ComfyUI não anexou patches LoRA ao modelo Wan.",
+            details={"comfyui": getattr(error, "details", {})},
+        )
+    return None
+
+
 def _handle_identity_ab(event: dict[str, Any]) -> dict[str, Any]:
     started_at = now_ms()
     request = parse_identity_ab_request(event)
     validate_required_models(request, settings)
     lock = reserve_one_shot(request, settings)
     comfy_inputs: list[Path] = []
+    attestation_path = runtime_attestation_path(request, settings)
+    attestation_path.unlink(missing_ok=True)
     try:
-        with tempfile.TemporaryDirectory(dir=str(settings.temp_dir), prefix=f"identity_ab_{request.request_id}_") as temp:
+        with tempfile.TemporaryDirectory(
+            dir=str(settings.temp_dir), prefix=f"identity_ab_{request.request_id}_"
+        ) as temp:
             work_dir = Path(temp)
             client = r2_client(settings)
-            neutral = download_private_ref(client, request.base_video_ref, work_dir / "neutral-motion-01.mp4", settings.max_video_download_mb)
-            base_input = _copy_to_comfy_input(neutral, request_id=request.request_id, role="neutral")
+            neutral = download_private_ref(
+                client,
+                request.base_video_ref,
+                work_dir / "neutral-motion-01.mp4",
+                settings.max_video_download_mb,
+            )
+            base_input = _copy_to_comfy_input(
+                neutral, request_id=request.request_id, role="neutral"
+            )
             comfy_inputs.append(base_input)
-            _, lora_name = materialize_lora(client, request, settings, work_dir)
-            workflow = prepare_workflow(request=request, source_image_filename=None, base_video_filename=base_input.name, output_prefix=f"privacy/identity-ab/{request.request_id}", settings=settings, lora_filename=lora_name)
-            update_lock(lock, "running", workflow_id=workflow.workflow_id)
+            _, lora_name, conversion_attestation = materialize_lora(
+                client, request, settings, work_dir
+            )
+            workflow = prepare_workflow(
+                request=request,
+                source_image_filename=None,
+                base_video_filename=base_input.name,
+                output_prefix=f"privacy/identity-ab/{request.request_id}",
+                settings=settings,
+                lora_filename=lora_name,
+                lora_attestation_name=request.request_id,
+            )
+            update_lock(
+                lock,
+                "running",
+                workflow_id=workflow.workflow_id,
+                lora_conversion_version=conversion_attestation.get("conversion_version"),
+                lora_pair_count=conversion_attestation.get("pair_count"),
+            )
             _process_manager.ensure_started(request.request_id)
             prompt_id = _client.queue_prompt(workflow.prompt, request.request_id)
             try:
                 history = _client.wait_for_history(prompt_id, request.request_id)
-            except Exception:
-                _process_manager.interrupt(request.request_id); raise
-            a_path = _client.download_output(record=history, output_nodes=("12",), destination=work_dir / "baseline_without_lora.mp4", request_id=request.request_id, strict_output_nodes=True)
-            b_path = _client.download_output(record=history, output_nodes=("17",), destination=work_dir / "candidate_with_lora.mp4", request_id=request.request_id, strict_output_nodes=True)
+            except ComfyUIError as error:
+                _process_manager.interrupt(request.request_id)
+                classified = _identity_comfy_failure(error)
+                if classified is not None:
+                    raise classified from error
+                raise
+            runtime_attestation = read_runtime_lora_attestation(
+                request,
+                settings,
+                expected_pair_count=int(conversion_attestation["pair_count"]),
+            )
+            a_path = _client.download_output(
+                record=history,
+                output_nodes=("12",),
+                destination=work_dir / "baseline_without_lora.mp4",
+                request_id=request.request_id,
+                strict_output_nodes=True,
+            )
+            b_path = _client.download_output(
+                record=history,
+                output_nodes=("17",),
+                destination=work_dir / "candidate_with_lora.mp4",
+                request_id=request.request_id,
+                strict_output_nodes=True,
+            )
+            visual_guard = compare_ab_videos(a_path, b_path)
             assets = []
-            for asset_key, label, path in (("baseline_without_lora", "A — vídeo neutro sem LoRA", a_path), ("candidate_with_lora", "B — mesmo vídeo com LoRA DiT 0.65", b_path)):
-                uploaded = publish_private_named_output(path, settings, request.request_id, asset_key, request.contract_version)
-                assets.append({**uploaded, "asset_key":asset_key, "label":label, "kind":"video", "width":832, "height":480, "num_frames":17, "fps":16, "duration_seconds":17/16, "private_only":True})
-            update_lock(lock, "completed", asset_count=2)
-            return {"contract_version":request.contract_version,"status":"identity_neutral_ab_completed","qa_kit":{"schema_version":"privacy-identity-neutral-ab-kit-v1","actor_profile_id":request.actor_profile_id,"training_run_id":request.training_run_id,"adapter_id":request.adapter_id,"asset_count":2,"assets":assets,"reviewable":True,"same_seed":99,"same_neutral_source_sha256":request.base_video_ref["sha256"],"lora_strength":0.65,"private_only":True,"approval_allowed":False},"elapsed_ms":now_ms()-started_at}
+            for asset_key, label, path in (
+                ("baseline_without_lora", "A — vídeo neutro sem LoRA", a_path),
+                ("candidate_with_lora", "B — mesmo vídeo com LoRA DiT 0.65", b_path),
+            ):
+                uploaded = publish_private_named_output(
+                    path, settings, request.request_id, asset_key, request.contract_version
+                )
+                assets.append(
+                    {
+                        **uploaded,
+                        "asset_key": asset_key,
+                        "label": label,
+                        "kind": "video",
+                        "width": 832,
+                        "height": 480,
+                        "num_frames": 17,
+                        "fps": 16,
+                        "duration_seconds": 17 / 16,
+                        "private_only": True,
+                    }
+                )
+            update_lock(
+                lock,
+                "completed",
+                asset_count=2,
+                patched_model_key_count=runtime_attestation["patched_model_key_count"],
+                ab_ssim_all=visual_guard["ssim_all"],
+            )
+            return {
+                "contract_version": request.contract_version,
+                "status": "identity_neutral_ab_completed",
+                "qa_kit": {
+                    "schema_version": "privacy-identity-neutral-ab-kit-v2",
+                    "actor_profile_id": request.actor_profile_id,
+                    "training_run_id": request.training_run_id,
+                    "adapter_id": request.adapter_id,
+                    "asset_count": 2,
+                    "assets": assets,
+                    "reviewable": True,
+                    "same_seed": 99,
+                    "same_neutral_source_sha256": request.base_video_ref["sha256"],
+                    "lora_strength": 0.65,
+                    "private_only": True,
+                    "approval_allowed": False,
+                    "lora_attestation": {
+                        "source_format": conversion_attestation["source_format"],
+                        "target_format": conversion_attestation["target_format"],
+                        "conversion_version": conversion_attestation["conversion_version"],
+                        "source_sha256": conversion_attestation["source_sha256"],
+                        "translated_sha256": conversion_attestation["translated_sha256"],
+                        "tensor_pairs": conversion_attestation["pair_count"],
+                        "model_keys_matched": conversion_attestation["model_keys_matched"],
+                        "loaded_patch_count": runtime_attestation["loaded_patch_count"],
+                        "patched_model_key_count": runtime_attestation["patched_model_key_count"],
+                        "lora_applied": runtime_attestation["lora_applied"],
+                    },
+                    "visual_guard": visual_guard,
+                },
+                "elapsed_ms": now_ms() - started_at,
+            }
+    except WorkerError as error:
+        update_lock(
+            lock,
+            "failed",
+            error_code=error.code,
+            error_details=error.details,
+            automatic_retry=False,
+        )
+        raise RuntimeError(f"{error.code}: {error}") from error
     except Exception as error:
-        update_lock(lock, "failed", error_code=type(error).__name__, automatic_retry=False)
+        update_lock(
+            lock,
+            "failed",
+            error_code=type(error).__name__,
+            automatic_retry=False,
+        )
         raise
     finally:
-        for path in comfy_inputs: path.unlink(missing_ok=True)
+        for path in comfy_inputs:
+            path.unlink(missing_ok=True)
+        attestation_path.unlink(missing_ok=True)
 
 def handler(event: dict[str, Any]) -> dict[str, Any]:
     if _input_payload(event).get("contract_version") == IDENTITY_AB_CONTRACT_VERSION:

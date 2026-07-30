@@ -18,14 +18,15 @@ def event():
 def test_neutral_ab_contract_and_graph_are_exact():
     request=parse_identity_ab_request(event())
     settings=replace(Settings(), workflow_root=ROOT/"workflows")
-    prepared=prepare_workflow(request=request, source_image_filename=None, base_video_filename="neutral.mp4", output_prefix="privacy/ab", settings=settings, lora_filename="identity.safetensors")
+    prepared=prepare_workflow(request=request, source_image_filename=None, base_video_filename="neutral.mp4", output_prefix="privacy/ab", settings=settings, lora_filename="identity.safetensors", lora_attestation_name="ab-001")
     p=prepared.prompt
     assert p["6"]["inputs"]["video"] == "neutral.mp4"
     assert p["7"]["inputs"]["image"] == ["6",0]
     assert p["9"]["inputs"]["seed"] == p["14"]["inputs"]["seed"] == 99
     assert p["9"]["inputs"]["denoise"] == p["14"]["inputs"]["denoise"] == 1.0
     assert p["9"]["inputs"]["model"] == ["1",0]
-    assert p["13"]["class_type"] == "LoraLoaderModelOnly"
+    assert p["13"]["class_type"] == "PrivacyAttestedLoraLoaderModelOnly"
+    assert p["13"]["inputs"]["attestation_name"] == "ab-001"
     assert p["13"]["inputs"]["strength_model"] == 0.65
     assert p["14"]["inputs"]["model"] == ["13",0]
     assert prepared.output_nodes == ("12","17")

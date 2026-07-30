@@ -10,8 +10,17 @@ from typing import Any
 
 import boto3
 
+from .lora_namespace import (
+    CONVERSION_VERSION,
+    convert_diffsynth_peft_lora,
+    model_layout_sha256,
+    read_conversion_attestation,
+    sha256_file,
+    write_conversion_attestation,
+)
+
 from .config import Settings
-from .errors import ContractError, DownloadError
+from .errors import ContractError, DownloadError, LoraCompatibilityError, LoraNotAppliedError
 
 CONTRACT_VERSION = "privacy-identity-neutral-ab-v1"
 WORKFLOW_ID = "wan-2.1-v2v-identity-ab-v1"
@@ -132,16 +141,90 @@ def download_private_ref(client, ref: dict[str, str], destination: Path, max_mb:
     return destination
 
 
-def materialize_lora(client, request: IdentityAbRequest, settings: Settings, work_dir: Path) -> tuple[Path, str]:
-    staged = download_private_ref(client, request.adapter_ref, work_dir / "identity_adapter.safetensors", 4096)
-    name = f"privacy_identity_{request.adapter_ref['sha256'][:24]}.safetensors"
+def materialize_lora(
+    client, request: IdentityAbRequest, settings: Settings, work_dir: Path
+) -> tuple[Path, str, dict[str, Any]]:
+    staged = download_private_ref(
+        client, request.adapter_ref, work_dir / "identity_adapter_original.safetensors", 4096
+    )
+    name = (
+        f"privacy_identity_{request.adapter_ref['sha256'][:24]}_"
+        f"{CONVERSION_VERSION}.safetensors"
+    )
     destination = settings.model_root / "loras" / name
+    attestation_path = destination.with_suffix(destination.suffix + ".attestation.json")
+    model_path = settings.model_root / "diffusion_models" / settings.v2v_model_name
+    if not model_path.is_file():
+        raise LoraCompatibilityError(
+            "Modelo Wan VACE não encontrado para o preflight LoRA.",
+            details={"model_path": str(model_path)},
+        )
+
     destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.exists() and hashlib.sha256(destination.read_bytes()).hexdigest() != request.adapter_ref["sha256"]:
-        raise DownloadError("Cache de LoRA privado com checksum divergente.")
-    if not destination.exists():
-        os.replace(staged, destination)
-    return destination, name
+    if destination.exists() or attestation_path.exists():
+        if not destination.exists() or not attestation_path.exists():
+            raise LoraCompatibilityError("Cache traduzido da LoRA está incompleto.")
+        cached = read_conversion_attestation(attestation_path)
+        if cached.get("source_sha256") != request.adapter_ref["sha256"]:
+            raise LoraCompatibilityError("Cache traduzido pertence a outro adapter.")
+        if cached.get("translated_sha256") != sha256_file(destination):
+            raise LoraCompatibilityError("Checksum do cache traduzido é divergente.")
+        if cached.get("model_layout_sha256") != model_layout_sha256(model_path):
+            raise LoraCompatibilityError("Cache traduzido foi atestado contra outro layout Wan.")
+        staged.unlink(missing_ok=True)
+        return destination, name, cached
+
+    converted_temp = work_dir / name
+    attestation = convert_diffsynth_peft_lora(
+        staged,
+        model_path,
+        converted_temp,
+        source_sha256=request.adapter_ref["sha256"],
+    )
+    os.replace(converted_temp, destination)
+    attestation = {**attestation, "translated_path": str(destination)}
+    write_conversion_attestation(attestation_path, attestation)
+    staged.unlink(missing_ok=True)
+    return destination, name, attestation
+
+
+def runtime_attestation_path(request: IdentityAbRequest, settings: Settings) -> Path:
+    safe = "".join(char if char.isalnum() or char in "._-" else "_" for char in request.request_id)
+    return settings.runtime_root / "identity-ab-attestations" / f"{safe[:160]}.json"
+
+
+def read_runtime_lora_attestation(
+    request: IdentityAbRequest,
+    settings: Settings,
+    *,
+    expected_pair_count: int,
+) -> dict[str, Any]:
+    path = runtime_attestation_path(request, settings)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LoraNotAppliedError(
+            "O ComfyUI terminou sem produzir atestação de patches LoRA.",
+            details={"attestation_path": str(path)},
+        ) from exc
+    if payload.get("lora_applied") is not True:
+        raise LoraNotAppliedError("A atestação do ComfyUI não confirma LoRA aplicada.", details=payload)
+    if int(payload.get("patched_model_key_count") or 0) <= 0:
+        raise LoraNotAppliedError("O ComfyUI registrou zero patches LoRA.", details=payload)
+    if payload.get("all_expected_loaded") is not True or payload.get("all_expected_patched") is not True:
+        raise LoraCompatibilityError("Nem todos os pares LoRA foram aplicados.", details=payload)
+    expected = int(expected_pair_count)
+    counts = {
+        "expected_pair_count": int(payload.get("expected_pair_count") or 0),
+        "loaded_patch_count": int(payload.get("loaded_patch_count") or 0),
+        "patched_model_key_count": int(payload.get("patched_model_key_count") or 0),
+    }
+    if expected <= 0 or any(value != expected for value in counts.values()):
+        raise LoraNotAppliedError(
+            "A atestação runtime não comprova todos os pares LoRA esperados.",
+            details={"conversion_pair_count": expected, **counts},
+        )
+    return payload
 
 
 def reserve_one_shot(request: IdentityAbRequest, settings: Settings) -> Path:

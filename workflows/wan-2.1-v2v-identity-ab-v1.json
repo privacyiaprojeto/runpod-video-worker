@@ -2,7 +2,7 @@
   "schema_version": "privacy-comfyui-workflow-v1",
   "engine": "wan-2.1-v2v",
   "workflow_version": "1",
-  "description": "Neutral one-job A/B identity QA: same private motion, seed and sampling; B injects a DiT LoRA through LoraLoaderModelOnly.",
+  "description": "Controlled neutral A/B with deterministic DiffSynth PEFT namespace translation, attested ComfyUI patches, and visual fail-fast guard.",
   "prompt": {
     "1": {
       "inputs": {
@@ -210,11 +210,12 @@
           0
         ],
         "lora_name": "identity.safetensors",
-        "strength_model": 0.65
+        "strength_model": 0.65,
+        "attestation_name": "identity-ab"
       },
-      "class_type": "LoraLoaderModelOnly",
+      "class_type": "PrivacyAttestedLoraLoaderModelOnly",
       "_meta": {
-        "title": "B - DiT LoRA 0.65"
+        "title": "B - Attested DiT LoRA 0.65 (Fail Fast)"
       }
     },
     "14": {
@@ -408,6 +409,10 @@
     "vae_name": {
       "node_id": "3",
       "input": "vae_name"
+    },
+    "lora_attestation_name": {
+      "node_id": "13",
+      "input": "attestation_name"
     }
   },
   "output_nodes": [

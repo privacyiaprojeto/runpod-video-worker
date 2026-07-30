@@ -29,3 +29,15 @@ class ComfyUIError(WorkerError):
 
 class OutputError(WorkerError):
     code = "OUTPUT_ERROR"
+
+
+class LoraCompatibilityError(WorkerError):
+    code = "LORA_KEY_FORMAT_MISMATCH"
+
+
+class LoraNotAppliedError(WorkerError):
+    code = "LORA_NOT_APPLIED"
+
+
+class ABOutputsIdenticalError(WorkerError):
+    code = "AB_OUTPUTS_IDENTICAL"

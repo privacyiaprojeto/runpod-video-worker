@@ -95,6 +95,7 @@ def prepare_workflow(
     output_prefix: str,
     settings: Settings,
     lora_filename: str | None = None,
+    lora_attestation_name: str | None = None,
 ) -> PreparedWorkflow:
     path = settings.workflow_root / f"{request.workflow_id}.json"
     if not path.exists():
@@ -129,6 +130,7 @@ def prepare_workflow(
         "filename_prefix_a": f"{output_prefix}/A_without_lora",
         "filename_prefix_b": f"{output_prefix}/B_with_lora",
         "lora_name": lora_filename,
+        "lora_attestation_name": lora_attestation_name,
         "i2v_model_name": settings.i2v_model_name,
         "v2v_model_name": settings.v2v_model_name,
         "text_encoder_name": settings.text_encoder_name,
