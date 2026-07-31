@@ -154,7 +154,7 @@ def _handle_identity_ab(event: dict[str, Any]) -> dict[str, Any]:
             assets = []
             for asset_key, label, path in (
                 ("baseline_without_lora", "A — vídeo neutro sem LoRA", a_path),
-                ("candidate_with_lora", "B — vídeo neutro + KYC frontal + LoRA DiT 0.65", b_path),
+                ("candidate_with_lora", "B — movimento estrutural + KYC frontal + LoRA DiT 0.65", b_path),
             ):
                 uploaded = publish_private_named_output(
                     path, settings, request.request_id, asset_key, request.contract_version
@@ -196,6 +196,9 @@ def _handle_identity_ab(event: dict[str, Any]) -> dict[str, Any]:
                     "branch_a_reference": "neutral_first_frame",
                     "branch_b_reference_system_tag": request.reference_image_ref["system_tag"],
                     "branch_b_reference_sha256": request.reference_image_ref["sha256"],
+                    "branch_b_control_mode": "privacy_motion_only_structure_v1",
+                    "branch_b_control_source_sha256": request.base_video_ref["sha256"],
+                    "branch_b_raw_rgb_control_forbidden": True,
                     "lora_strength": 0.65,
                     "private_only": True,
                     "approval_allowed": False,

@@ -67,7 +67,10 @@ def test_neutral_ab_contract_and_graph_are_exact():
     assert p["8"]["inputs"]["control_video"] == ["6", 0]
     assert p["8"]["inputs"]["reference_image"] == ["7", 0]
     assert p["18"]["inputs"]["image"] == "face-front.jpg"
-    assert p["19"]["inputs"]["control_video"] == ["6", 0]
+    assert p["20"]["class_type"] == "PrivacyMotionOnlyStructure"
+    assert p["20"]["inputs"]["images"] == ["6", 0]
+    assert p["19"]["inputs"]["control_video"] == ["20", 0]
+    assert p["19"]["inputs"]["control_video"] != ["6", 0]
     assert p["19"]["inputs"]["reference_image"] == ["18", 0]
     assert p["9"]["inputs"]["seed"] == p["14"]["inputs"]["seed"] == 99
     assert p["9"]["inputs"]["denoise"] == p["14"]["inputs"]["denoise"] == 1.0

@@ -2,7 +2,7 @@
   "schema_version": "privacy-comfyui-workflow-v1",
   "engine": "wan-2.1-v2v",
   "workflow_version": "1",
-  "description": "D3.6H10 controlled identity A/B: branch A keeps neutral first-frame reference; branch B uses the same neutral control video plus private face_front KYC and attested DiffSynth LoRA.",
+  "description": "D3.6H11 controlled identity A/B: branch A keeps the homologated raw neutral baseline; branch B converts the same neutral video to motion-only coarse structural edges before VACE, then applies private face_front KYC and attested DiffSynth LoRA.",
   "prompt": {
     "1": {
       "inputs": {
@@ -327,7 +327,7 @@
           0
         ],
         "control_video": [
-          "6",
+          "20",
           0
         ],
         "reference_image": [
@@ -337,7 +337,24 @@
       },
       "class_type": "WanVaceToVideo",
       "_meta": {
-        "title": "B - Neutral Motion + KYC Face Front"
+        "title": "B - Motion-Only Structure + KYC Face Front"
+      }
+    },
+    "20": {
+      "inputs": {
+        "images": [
+          "6",
+          0
+        ],
+        "spatial_downscale": 4,
+        "edge_threshold": 0.08,
+        "motion_threshold": 0.06,
+        "motion_dilation": 11,
+        "structure_fill": 0.22
+      },
+      "class_type": "PrivacyMotionOnlyStructure",
+      "_meta": {
+        "title": "B - Motion-Only Structural Edges"
       }
     }
   },
@@ -476,5 +493,6 @@
   "output_nodes": [
     "12",
     "17"
-  ]
+  ],
+  "revision": "D3.6H11-motion-only-structural-control-v1"
 }
