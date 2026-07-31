@@ -89,12 +89,25 @@ def _handle_identity_ab(event: dict[str, Any]) -> dict[str, Any]:
                 neutral, request_id=request.request_id, role="neutral"
             )
             comfy_inputs.append(base_input)
+
+            reference_suffix = Path(request.reference_image_ref["key"]).suffix.lower()
+            reference = download_private_ref(
+                client,
+                request.reference_image_ref,
+                work_dir / f"kyc-face-front{reference_suffix}",
+                settings.max_image_download_mb,
+            )
+            reference_input = _copy_to_comfy_input(
+                reference, request_id=request.request_id, role="kyc_face_front"
+            )
+            comfy_inputs.append(reference_input)
+
             _, lora_name, conversion_attestation = materialize_lora(
                 client, request, settings, work_dir
             )
             workflow = prepare_workflow(
                 request=request,
-                source_image_filename=None,
+                source_image_filename=reference_input.name,
                 base_video_filename=base_input.name,
                 output_prefix=f"privacy/identity-ab/{request.request_id}",
                 settings=settings,
@@ -141,7 +154,7 @@ def _handle_identity_ab(event: dict[str, Any]) -> dict[str, Any]:
             assets = []
             for asset_key, label, path in (
                 ("baseline_without_lora", "A — vídeo neutro sem LoRA", a_path),
-                ("candidate_with_lora", "B — mesmo vídeo com LoRA DiT 0.65", b_path),
+                ("candidate_with_lora", "B — vídeo neutro + KYC frontal + LoRA DiT 0.65", b_path),
             ):
                 uploaded = publish_private_named_output(
                     path, settings, request.request_id, asset_key, request.contract_version
@@ -180,6 +193,9 @@ def _handle_identity_ab(event: dict[str, Any]) -> dict[str, Any]:
                     "reviewable": True,
                     "same_seed": 99,
                     "same_neutral_source_sha256": request.base_video_ref["sha256"],
+                    "branch_a_reference": "neutral_first_frame",
+                    "branch_b_reference_system_tag": request.reference_image_ref["system_tag"],
+                    "branch_b_reference_sha256": request.reference_image_ref["sha256"],
                     "lora_strength": 0.65,
                     "private_only": True,
                     "approval_allowed": False,

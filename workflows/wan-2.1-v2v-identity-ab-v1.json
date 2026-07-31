@@ -2,7 +2,7 @@
   "schema_version": "privacy-comfyui-workflow-v1",
   "engine": "wan-2.1-v2v",
   "workflow_version": "1",
-  "description": "Controlled neutral A/B with deterministic DiffSynth PEFT namespace translation, attested ComfyUI patches, and visual fail-fast guard.",
+  "description": "D3.6H10 controlled identity A/B: branch A keeps neutral first-frame reference; branch B uses the same neutral control video plus private face_front KYC and attested DiffSynth LoRA.",
   "prompt": {
     "1": {
       "inputs": {
@@ -231,15 +231,15 @@
           0
         ],
         "positive": [
-          "8",
+          "19",
           0
         ],
         "negative": [
-          "8",
+          "19",
           1
         ],
         "latent_image": [
-          "8",
+          "19",
           2
         ]
       },
@@ -255,7 +255,7 @@
           0
         ],
         "trim_amount": [
-          "8",
+          "19",
           3
         ]
       },
@@ -297,6 +297,48 @@
       "_meta": {
         "title": "Save B With LoRA"
       }
+    },
+    "18": {
+      "inputs": {
+        "image": "kyc-face-front.jpg"
+      },
+      "class_type": "LoadImage",
+      "_meta": {
+        "title": "B - Private KYC Face Front Reference"
+      }
+    },
+    "19": {
+      "inputs": {
+        "width": 832,
+        "height": 480,
+        "length": 17,
+        "batch_size": 1,
+        "strength": 1.0,
+        "positive": [
+          "4",
+          0
+        ],
+        "negative": [
+          "5",
+          0
+        ],
+        "vae": [
+          "3",
+          0
+        ],
+        "control_video": [
+          "6",
+          0
+        ],
+        "reference_image": [
+          "18",
+          0
+        ]
+      },
+      "class_type": "WanVaceToVideo",
+      "_meta": {
+        "title": "B - Neutral Motion + KYC Face Front"
+      }
     }
   },
   "bindings": {
@@ -320,6 +362,10 @@
       {
         "node_id": "8",
         "input": "width"
+      },
+      {
+        "node_id": "19",
+        "input": "width"
       }
     ],
     "height": [
@@ -330,6 +376,10 @@
       {
         "node_id": "8",
         "input": "height"
+      },
+      {
+        "node_id": "19",
+        "input": "height"
       }
     ],
     "frames": [
@@ -339,6 +389,10 @@
       },
       {
         "node_id": "8",
+        "input": "length"
+      },
+      {
+        "node_id": "19",
         "input": "length"
       }
     ],
@@ -413,6 +467,10 @@
     "lora_attestation_name": {
       "node_id": "13",
       "input": "attestation_name"
+    },
+    "source_image": {
+      "node_id": "18",
+      "input": "image"
     }
   },
   "output_nodes": [

@@ -7,9 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import torch
-from safetensors import safe_open
-from safetensors.torch import save_file
 
 from .errors import LoraCompatibilityError
 
@@ -49,6 +46,17 @@ def sha256_file(path: Path) -> str:
 
 
 def _header(path: Path) -> tuple[dict[str, TensorHeader], dict[str, str]]:
+    # D3.6H10-HF2 — lazy safetensors/PyTorch runtime imports
+    # Merely importing the contract must not require GPU/runtime packages.
+    # safetensors is loaded only when an adapter/model header is actually read.
+    try:
+        from safetensors import safe_open
+    except ModuleNotFoundError as exc:
+        raise LoraCompatibilityError(
+            "Runtime safetensors indisponível para inspecionar a LoRA Wan.",
+            details={"missing_dependency": getattr(exc, "name", None) or "safetensors"},
+        ) from exc
+
     try:
         with safe_open(path, framework="pt", device="cpu") as handle:
             headers = {
@@ -282,9 +290,24 @@ def convert_diffsynth_peft_lora(
     *,
     source_sha256: str | None = None,
 ) -> dict[str, Any]:
+    # D3.6H10-HF2 — lazy safetensors/PyTorch runtime imports
+    # Tensor conversion is the only place that requires PyTorch and
+    # safetensors.torch. Contract parsing and lock tests stay dependency-light.
+    # D3.6H10-HF3 — bind safe_open inside conversion runtime
+    # convert_diffsynth_peft_lora uses safe_open directly after inspection.
+    try:
+        import torch
+        from safetensors import safe_open
+        from safetensors.torch import save_file
+    except ModuleNotFoundError as exc:
+        raise LoraCompatibilityError(
+            "Runtime PyTorch/safetensors.torch indisponível para materializar a LoRA Wan.",
+            details={"missing_dependency": getattr(exc, "name", None) or "torch"},
+        ) from exc
+
     inspection = inspect_diffsynth_peft_lora(adapter_path, model_path)
     pairs = inspection.pop("_pairs")
-    tensors: dict[str, torch.Tensor] = {}
+    tensors: dict[str, Any] = {}
 
     try:
         with safe_open(adapter_path, framework="pt", device="cpu") as handle:

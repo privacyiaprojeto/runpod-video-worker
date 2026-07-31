@@ -47,6 +47,27 @@ def _private_ref(value: Any) -> dict[str, str]:
     return {"bucket": bucket, "key": key, "sha256": _sha(item.get("sha256"))}
 
 
+def _kyc_reference_ref(value: Any, actor_profile_id: str) -> dict[str, str]:
+    item = value if isinstance(value, dict) else {}
+    ref = _private_ref(item)
+    system_tag = _text(item.get("system_tag")).lower()
+    if system_tag != "face_front":
+        raise ContractError("A referência KYC do ramo B precisa usar system_tag face_front.")
+    if ref["bucket"] != NEUTRAL_BUCKET:
+        raise ContractError("A referência KYC do ramo B precisa permanecer no bucket privado aprovado.")
+    normalized_key = ref["key"].lower()
+    actor_scope = f"/actor-{actor_profile_id.lower()}/"
+    if not normalized_key.startswith("vault/actor-mapping/") or actor_scope not in f"/{normalized_key}":
+        raise ContractError("A referência KYC do ramo B não pertence ao cofre privado deste ator.")
+    if Path(ref["key"]).suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise ContractError("Formato da referência KYC frontal não suportado.")
+    return {
+        **ref,
+        "system_tag": "face_front",
+        "asset_id": _text(item.get("asset_id")),
+    }
+
+
 @dataclass(frozen=True)
 class IdentityAbRequest:
     request_id: str
@@ -56,6 +77,7 @@ class IdentityAbRequest:
     positive_prompt: str
     negative_prompt: str
     base_video_ref: dict[str, str]
+    reference_image_ref: dict[str, str]
     adapter_ref: dict[str, str]
     actor_profile_id: str
     training_run_id: str
@@ -87,18 +109,23 @@ def parse_identity_ab_request(event: dict[str, Any]) -> IdentityAbRequest:
     request_id = _text(payload.get("request_id"))
     if not request_id:
         raise ContractError("request_id obrigatório para o teste A/B.")
-    base = _private_ref(payload.get("base_video"))
-    if base["bucket"] != NEUTRAL_BUCKET or base["key"] != NEUTRAL_KEY:
-        raise ContractError("O A/B aceita somente o vídeo neutro homologado.")
-    adapter = _private_ref(payload.get("adapter"))
+
     ids = [_text(payload.get(name)) for name in ("actor_profile_id", "training_run_id", "adapter_id")]
     if any(not value for value in ids):
         raise ContractError("Escopo do ator, run e adapter é obrigatório.")
+
+    base = _private_ref(payload.get("base_video"))
+    if base["bucket"] != NEUTRAL_BUCKET or base["key"] != NEUTRAL_KEY:
+        raise ContractError("O A/B aceita somente o vídeo neutro homologado.")
+    reference_image = _kyc_reference_ref(payload.get("reference_image"), ids[0])
+    adapter = _private_ref(payload.get("adapter"))
+
     sampling = payload.get("sampling") or {}
     exact = {"seed": 99, "width": 832, "height": 480, "fps": 16, "frames": 17, "steps": 30, "denoise": 1.0, "lora_strength": 0.65}
     mismatched = [key for key, expected in exact.items() if sampling.get(key) != expected]
     if mismatched:
         raise ContractError("Parâmetros A/B divergentes do perfil homologado.", details={"fields": mismatched})
+
     smoke = payload.get("smoke") or {}
     if smoke.get("enabled") is not True or smoke.get("one_shot") is not True or int(smoke.get("max_jobs") or 0) != 1:
         raise ContractError("O teste A/B precisa ser one-shot.")
@@ -107,21 +134,46 @@ def parse_identity_ab_request(event: dict[str, Any]) -> IdentityAbRequest:
         expiry = datetime.fromisoformat(expiry_raw.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ContractError("Janela do A/B inválida.") from exc
-    if expiry.tzinfo is None: expiry = expiry.replace(tzinfo=timezone.utc)
-    if expiry <= datetime.now(timezone.utc): raise ContractError("Janela do A/B expirada.")
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    if expiry <= datetime.now(timezone.utc):
+        raise ContractError("Janela do A/B expirada.")
+
     safety = payload.get("safety") or {}
-    required = {"private_storage_only": True, "public_urls_forbidden": True, "automatic_retry_allowed": False, "one_shot_smoke": True, "kyc_source_forbidden": True, "product_release_allowed": False}
+    required = {
+        "private_storage_only": True,
+        "public_urls_forbidden": True,
+        "automatic_retry_allowed": False,
+        "one_shot_smoke": True,
+        "kyc_reference_required": True,
+        "kyc_reference_private_only": True,
+        "kyc_reference_branch_b_only": True,
+        "kyc_reference_persistence_forbidden": True,
+        "product_release_allowed": False,
+    }
     if any(safety.get(key) is not expected for key, expected in required.items()):
         raise ContractError("Contrato de segurança A/B incompleto.")
+
     prompt = payload.get("prompt") or {}
     positive = _text(prompt.get("positive"))
-    if not positive: raise ContractError("Prompt neutro obrigatório.")
-    return IdentityAbRequest(
-        request_id=request_id, contract_version=CONTRACT_VERSION, engine="wan-2.1-v2v", task="identity.neutral_ab",
-        positive_prompt=positive, negative_prompt=_text(prompt.get("negative")), base_video_ref=base, adapter_ref=adapter,
-        actor_profile_id=ids[0], training_run_id=ids[1], adapter_id=ids[2], metadata=payload.get("metadata") or {},
-    )
+    if not positive:
+        raise ContractError("Prompt neutro obrigatório.")
 
+    return IdentityAbRequest(
+        request_id=request_id,
+        contract_version=CONTRACT_VERSION,
+        engine="wan-2.1-v2v",
+        task="identity.neutral_ab",
+        positive_prompt=positive,
+        negative_prompt=_text(prompt.get("negative")),
+        base_video_ref=base,
+        reference_image_ref=reference_image,
+        adapter_ref=adapter,
+        actor_profile_id=ids[0],
+        training_run_id=ids[1],
+        adapter_id=ids[2],
+        metadata=payload.get("metadata") or {},
+    )
 
 def r2_client(settings: Settings):
     if not settings.r2_configured:
