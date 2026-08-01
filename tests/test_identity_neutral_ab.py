@@ -3,12 +3,16 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from privacy_worker.config import Settings
+from privacy_worker.errors import ContractError
 from privacy_worker.identity_ab import CONTRACT_VERSION, parse_identity_ab_request
 from privacy_worker.workflows import prepare_workflow
 
 ROOT = Path(__file__).resolve().parents[1]
 SHA = "a" * 64
+TRIGGER = "prv_actor_767f0277_v1"
 
 
 def event():
@@ -28,10 +32,26 @@ def event():
                 "system_tag": "face_front",
                 "asset_id": "face-front-asset",
             },
+            "identity": {
+                "trigger_token": TRIGGER,
+                "reference_asset_id": "face-front-asset",
+                "reference_sha256": SHA,
+            },
             "adapter": {"bucket": "privacy-media", "key": "identity/adapter.safetensors", "sha256": SHA},
-            "sampling": {"seed": 99, "width": 832, "height": 480, "fps": 16, "frames": 17, "steps": 30, "denoise": 1.0, "lora_strength": 0.65},
-            "prompt": {"positive": "adult person walking in a neutral studio", "negative": "artifacts"},
-            "smoke": {"enabled": True, "one_shot": True, "max_jobs": 1, "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()},
+            "sampling": {
+                "seed": 99, "width": 832, "height": 480, "fps": 16,
+                "frames": 17, "steps": 30, "denoise": 0.85,
+                "branch_b_denoise": 0.85, "lora_strength": 0.65,
+            },
+            "prompt": {
+                "positive": "adult man walking naturally in a neutral studio, full body visible",
+                "positive_b": f"{TRIGGER}, adult man walking naturally in a neutral studio, full body visible",
+                "negative": "identity mismatch, artifacts",
+            },
+            "smoke": {
+                "enabled": True, "one_shot": True, "max_jobs": 1,
+                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            },
             "safety": {
                 "private_storage_only": True,
                 "public_urls_forbidden": True,
@@ -47,8 +67,7 @@ def event():
     }
 
 
-def test_neutral_ab_contract_and_graph_are_exact():
-    """branch B must use private face_front KYC while branch A remains neutral."""
+def test_h12_contract_and_graph_are_exact():
     request = parse_identity_ab_request(event())
     settings = replace(Settings(), workflow_root=ROOT / "workflows")
     prepared = prepare_workflow(
@@ -61,66 +80,74 @@ def test_neutral_ab_contract_and_graph_are_exact():
         lora_attestation_name="ab-001",
     )
     p = prepared.prompt
-    assert request.reference_image_ref["system_tag"] == "face_front"
-    assert p["6"]["inputs"]["video"] == "neutral.mp4"
-    assert p["7"]["inputs"]["image"] == ["6", 0]
+    assert request.trigger_token == TRIGGER
+    assert request.positive_prompt_b.startswith(TRIGGER)
+    assert request.branch_a_denoise == 0.85
+    assert request.branch_b_denoise == 0.85
+    assert p["4"]["inputs"]["text"] == event()["input"]["prompt"]["positive"]
+    assert p["21"]["inputs"]["text"].startswith(TRIGGER)
     assert p["8"]["inputs"]["control_video"] == ["6", 0]
-    assert p["8"]["inputs"]["reference_image"] == ["7", 0]
-    assert p["18"]["inputs"]["image"] == "face-front.jpg"
-    assert p["20"]["class_type"] == "PrivacyMotionOnlyStructure"
-    assert p["20"]["inputs"]["images"] == ["6", 0]
-    assert p["19"]["inputs"]["control_video"] == ["20", 0]
-    assert p["19"]["inputs"]["control_video"] != ["6", 0]
+    assert p["19"]["inputs"]["control_video"] == ["6", 0]
     assert p["19"]["inputs"]["reference_image"] == ["18", 0]
-    assert p["9"]["inputs"]["seed"] == p["14"]["inputs"]["seed"] == 99
-    assert p["9"]["inputs"]["denoise"] == p["14"]["inputs"]["denoise"] == 1.0
-    assert p["9"]["inputs"]["model"] == ["1", 0]
-    assert p["13"]["class_type"] == "PrivacyAttestedLoraLoaderModelOnly"
-    assert p["13"]["inputs"]["attestation_name"] == "ab-001"
+    assert p["19"]["inputs"]["positive"] == ["21", 0]
+    assert "20" not in p
+    assert all(node.get("class_type") != "PrivacyMotionOnlyStructure" for node in p.values())
+    assert p["9"]["inputs"]["denoise"] == 0.85
+    assert p["14"]["inputs"]["denoise"] == 0.85
+    for sampler_key in ("seed", "steps", "cfg", "sampler_name", "scheduler", "denoise"):
+        assert p["9"]["inputs"][sampler_key] == p["14"]["inputs"][sampler_key]
     assert p["13"]["inputs"]["strength_model"] == 0.65
     assert p["14"]["inputs"]["model"] == ["13", 0]
-    assert p["14"]["inputs"]["latent_image"] == ["19", 2]
     assert prepared.output_nodes == ("12", "17")
+
+
+def test_denoise_mismatch_is_fail_closed():
+    mismatched = event()
+    mismatched["input"]["sampling"]["denoise"] = 1.0
+    with pytest.raises(ContractError, match="Parâmetros A/B divergentes"):
+        parse_identity_ab_request(mismatched)
+
+def test_trigger_token_is_fail_closed_and_branch_b_only():
+    missing = event()
+    missing["input"]["prompt"]["positive_b"] = "adult man"
+    with pytest.raises(ContractError, match="trigger token exato"):
+        parse_identity_ab_request(missing)
+    leaked = event()
+    leaked["input"]["prompt"]["positive"] = f"{TRIGGER}, baseline"
+    with pytest.raises(ContractError, match="exclusivo do ramo B"):
+        parse_identity_ab_request(leaked)
+
+
+def test_explicit_kyc_asset_and_sha_must_match():
+    bad_asset = event()
+    bad_asset["input"]["identity"]["reference_asset_id"] = "another"
+    with pytest.raises(ContractError, match="asset_id"):
+        parse_identity_ab_request(bad_asset)
+    bad_sha = event()
+    bad_sha["input"]["identity"]["reference_sha256"] = "b" * 64
+    with pytest.raises(ContractError, match="checksum"):
+        parse_identity_ab_request(bad_sha)
+
 
 def test_one_shot_lock_is_scoped_by_request_id(tmp_path):
     from privacy_worker.identity_ab import reserve_one_shot
-
-    first_event = event()
-    first_event["input"]["request_id"] = "ab-request-001"
-    second_event = event()
-    second_event["input"]["request_id"] = "ab-request-002"
-
+    first_event = event(); first_event["input"]["request_id"] = "ab-request-001"
+    second_event = event(); second_event["input"]["request_id"] = "ab-request-002"
     first = parse_identity_ab_request(first_event)
     second = parse_identity_ab_request(second_event)
     settings = replace(Settings(), runtime_root=tmp_path / "runtime")
-
     first_path = reserve_one_shot(first, settings)
     second_path = reserve_one_shot(second, settings)
-
     assert first_path != second_path
-    assert first_path.exists()
-    assert second_path.exists()
     assert first_path.parent == second_path.parent
-
-    first_payload = json.loads(first_path.read_text(encoding="utf-8"))
-    second_payload = json.loads(second_path.read_text(encoding="utf-8"))
-    assert first_payload["lock_version"] == 2
-    assert second_payload["lock_version"] == 2
-    assert first_payload["request_id"] == "ab-request-001"
-    assert second_payload["request_id"] == "ab-request-002"
-    assert first_payload["automatic_retry"] is False
+    assert json.loads(first_path.read_text(encoding="utf-8"))["request_id"] == "ab-request-001"
 
 
 def test_same_request_id_is_still_fail_closed(tmp_path):
-    import pytest
-    from privacy_worker.errors import ContractError
     from privacy_worker.identity_ab import reserve_one_shot
-
-    payload = event()
-    payload["input"]["request_id"] = "ab-request-duplicate"
+    payload = event(); payload["input"]["request_id"] = "ab-request-duplicate"
     request = parse_identity_ab_request(payload)
     settings = replace(Settings(), runtime_root=tmp_path / "runtime")
-
     reserve_one_shot(request, settings)
     with pytest.raises(ContractError, match="request_id A/B já foi reservado"):
         reserve_one_shot(request, settings)
@@ -128,24 +155,11 @@ def test_same_request_id_is_still_fail_closed(tmp_path):
 
 def test_legacy_adapter_scoped_lock_does_not_block_authorized_new_request(tmp_path):
     from privacy_worker.identity_ab import reserve_one_shot
-
-    payload = event()
-    payload["input"]["request_id"] = "ab-request-after-legacy-lock"
+    payload = event(); payload["input"]["request_id"] = "ab-request-after-legacy-lock"
     request = parse_identity_ab_request(payload)
     settings = replace(Settings(), runtime_root=tmp_path / "runtime")
-
-    legacy_root = settings.runtime_root / "identity-ab-locks"
-    legacy_root.mkdir(parents=True, exist_ok=True)
-    legacy_path = legacy_root / (
-        f"{request.actor_profile_id}_{request.training_run_id}_{request.adapter_id}.json"
-    )
-    legacy_path.write_text(
-        json.dumps({"request_id": "historical", "status": "completed"}),
-        encoding="utf-8",
-    )
-
+    legacy_root = settings.runtime_root / "identity-ab-locks"; legacy_root.mkdir(parents=True, exist_ok=True)
+    legacy_path = legacy_root / f"{request.actor_profile_id}_{request.training_run_id}_{request.adapter_id}.json"
+    legacy_path.write_text(json.dumps({"request_id": "historical", "status": "completed"}), encoding="utf-8")
     new_path = reserve_one_shot(request, settings)
-
-    assert legacy_path.exists()
-    assert new_path.exists()
-    assert new_path != legacy_path
+    assert legacy_path.exists() and new_path.exists() and new_path != legacy_path

@@ -2,7 +2,7 @@
   "schema_version": "privacy-comfyui-workflow-v1",
   "engine": "wan-2.1-v2v",
   "workflow_version": "1",
-  "description": "D3.6H11 controlled identity A/B: branch A keeps the homologated raw neutral baseline; branch B converts the same neutral video to motion-only coarse structural edges before VACE, then applies private face_front KYC and attested DiffSynth LoRA.",
+  "description": "D3.6H12-HF2 controlled identity-package A/B: both branches use the same raw RGB source, seed, sampler and KSampler denoise 0.85. Branch B alone adds explicit private face_front KYC, the run trigger token and the attested DiffSynth LoRA.",
   "prompt": {
     "1": {
       "inputs": {
@@ -44,7 +44,7 @@
       },
       "class_type": "CLIPTextEncode",
       "_meta": {
-        "title": "Neutral Positive Prompt"
+        "title": "A - Baseline Positive Prompt"
       }
     },
     "5": {
@@ -130,7 +130,7 @@
         "cfg": 5.0,
         "sampler_name": "uni_pc",
         "scheduler": "simple",
-        "denoise": 1.0,
+        "denoise": 0.85,
         "model": [
           "1",
           0
@@ -150,7 +150,7 @@
       },
       "class_type": "KSampler",
       "_meta": {
-        "title": "A - Same Seed Without LoRA"
+        "title": "A - Same Seed Without LoRA, Denoise 0.85"
       }
     },
     "10": {
@@ -225,7 +225,7 @@
         "cfg": 5.0,
         "sampler_name": "uni_pc",
         "scheduler": "simple",
-        "denoise": 1.0,
+        "denoise": 0.85,
         "model": [
           "13",
           0
@@ -245,7 +245,7 @@
       },
       "class_type": "KSampler",
       "_meta": {
-        "title": "B - Same Seed With LoRA"
+        "title": "B - Same Seed With LoRA, Denoise 0.85"
       }
     },
     "15": {
@@ -315,7 +315,7 @@
         "batch_size": 1,
         "strength": 1.0,
         "positive": [
-          "4",
+          "21",
           0
         ],
         "negative": [
@@ -327,7 +327,7 @@
           0
         ],
         "control_video": [
-          "20",
+          "6",
           0
         ],
         "reference_image": [
@@ -337,24 +337,20 @@
       },
       "class_type": "WanVaceToVideo",
       "_meta": {
-        "title": "B - Motion-Only Structure + KYC Face Front"
+        "title": "B - Raw RGB V2V + Explicit KYC + Trigger Token"
       }
     },
-    "20": {
+    "21": {
       "inputs": {
-        "images": [
-          "6",
+        "text": "",
+        "clip": [
+          "2",
           0
-        ],
-        "spatial_downscale": 4,
-        "edge_threshold": 0.08,
-        "motion_threshold": 0.06,
-        "motion_dilation": 11,
-        "structure_fill": 0.22
+        ]
       },
-      "class_type": "PrivacyMotionOnlyStructure",
+      "class_type": "CLIPTextEncode",
       "_meta": {
-        "title": "B - Motion-Only Structural Edges"
+        "title": "B - Trigger Token Positive Prompt"
       }
     }
   },
@@ -488,11 +484,20 @@
     "source_image": {
       "node_id": "18",
       "input": "image"
+    },
+    "positive_prompt_b": {
+      "node_id": "21",
+      "input": "text"
+    },
+    "denoise_b": {
+      "node_id": "14",
+      "input": "denoise"
     }
   },
   "output_nodes": [
     "12",
     "17"
   ],
-  "revision": "D3.6H11-motion-only-structural-control-v1"
+  "revision": "D3.6H12-trigger-token-raw-rgb-v2v-denoise-085-v1",
+  "methodology_hotfix": "D3.6H12-HF2-paired-denoise-085-v1"
 }

@@ -116,6 +116,7 @@ def prepare_workflow(
     prompt = copy.deepcopy(envelope["prompt"])
     values = {
         "positive_prompt": request.positive_prompt,
+        "positive_prompt_b": getattr(request, "positive_prompt_b", request.positive_prompt),
         "negative_prompt": request.negative_prompt,
         "source_image": source_image_filename,
         "base_video": base_video_filename,
@@ -126,6 +127,7 @@ def prepare_workflow(
         "steps": request.steps,
         "cfg": request.guidance_scale,
         "seed": request.seed,
+        "denoise_b": getattr(request, "branch_b_denoise", 1.0),
         "filename_prefix": output_prefix,
         "filename_prefix_a": f"{output_prefix}/A_without_lora",
         "filename_prefix_b": f"{output_prefix}/B_with_lora",

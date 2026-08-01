@@ -60,7 +60,6 @@ COPY privacy_worker /app/privacy_worker
 COPY workflows /app/workflows
 COPY scripts /app/scripts
 COPY custom_nodes/privacy_lora_attestation /opt/ComfyUI/custom_nodes/privacy_lora_attestation
-COPY custom_nodes/privacy_motion_structure /opt/ComfyUI/custom_nodes/privacy_motion_structure
 COPY extra_model_paths.yaml /app/extra_model_paths.yaml
 
 RUN set -eux; \
@@ -74,7 +73,7 @@ RUN set -eux; \
       /runpod-volume/privacy-wan-runtime/input \
       /runpod-volume/privacy-wan-runtime/output \
       /runpod-volume/privacy-wan-runtime/temp; \
-    python -m compileall -q /app/handler.py /app/privacy_worker /opt/ComfyUI/custom_nodes/privacy_lora_attestation /opt/ComfyUI/custom_nodes/privacy_motion_structure; \
+    python -m compileall -q /app/handler.py /app/privacy_worker /opt/ComfyUI/custom_nodes/privacy_lora_attestation; \
     python /app/scripts/validate_workflows.py; \
     ffmpeg -version >/dev/null; \
     ffprobe -version >/dev/null

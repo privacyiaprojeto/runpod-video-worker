@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,6 +76,8 @@ class IdentityAbRequest:
     engine: str
     task: str
     positive_prompt: str
+    positive_prompt_b: str
+    trigger_token: str
     negative_prompt: str
     base_video_ref: dict[str, str]
     reference_image_ref: dict[str, str]
@@ -89,6 +92,8 @@ class IdentityAbRequest:
     steps: int = 30
     guidance_scale: float = 5.0
     seed: int = 99
+    branch_a_denoise: float = 0.85
+    branch_b_denoise: float = 0.85
     workflow_id: str = WORKFLOW_ID
     workflow_version: str = "1"
     graph_override: None = None
@@ -121,7 +126,17 @@ def parse_identity_ab_request(event: dict[str, Any]) -> IdentityAbRequest:
     adapter = _private_ref(payload.get("adapter"))
 
     sampling = payload.get("sampling") or {}
-    exact = {"seed": 99, "width": 832, "height": 480, "fps": 16, "frames": 17, "steps": 30, "denoise": 1.0, "lora_strength": 0.65}
+    exact = {
+        "seed": 99,
+        "width": 832,
+        "height": 480,
+        "fps": 16,
+        "frames": 17,
+        "steps": 30,
+        "denoise": 0.85,
+        "branch_b_denoise": 0.85,
+        "lora_strength": 0.65,
+    }
     mismatched = [key for key, expected in exact.items() if sampling.get(key) != expected]
     if mismatched:
         raise ContractError("Parâmetros A/B divergentes do perfil homologado.", details={"fields": mismatched})
@@ -154,17 +169,32 @@ def parse_identity_ab_request(event: dict[str, Any]) -> IdentityAbRequest:
     if any(safety.get(key) is not expected for key, expected in required.items()):
         raise ContractError("Contrato de segurança A/B incompleto.")
 
+    identity = payload.get("identity") or {}
+    trigger_token = _text(identity.get("trigger_token"))
+    if not re.fullmatch(r"prv_actor_[a-z0-9_]+", trigger_token):
+        raise ContractError("Trigger token da identidade ausente ou inválido.")
+    if _text(identity.get("reference_asset_id")) != reference_image["asset_id"]:
+        raise ContractError("A KYC explícita não corresponde ao asset_id identitário do contrato.")
+    if _sha(identity.get("reference_sha256")) != reference_image["sha256"]:
+        raise ContractError("A KYC explícita não corresponde ao checksum identitário do contrato.")
+
     prompt = payload.get("prompt") or {}
     positive = _text(prompt.get("positive"))
+    positive_b = _text(prompt.get("positive_b"))
     if not positive:
-        raise ContractError("Prompt neutro obrigatório.")
-
+        raise ContractError("Prompt-base do ramo A obrigatório.")
+    if not positive_b or not positive_b.startswith(trigger_token):
+        raise ContractError("O prompt do ramo B precisa iniciar com o trigger token exato da identidade.")
+    if trigger_token in positive:
+        raise ContractError("O trigger token deve permanecer exclusivo do ramo B.")
     return IdentityAbRequest(
         request_id=request_id,
         contract_version=CONTRACT_VERSION,
         engine="wan-2.1-v2v",
         task="identity.neutral_ab",
         positive_prompt=positive,
+        positive_prompt_b=positive_b,
+        trigger_token=trigger_token,
         negative_prompt=_text(prompt.get("negative")),
         base_video_ref=base,
         reference_image_ref=reference_image,
@@ -172,6 +202,8 @@ def parse_identity_ab_request(event: dict[str, Any]) -> IdentityAbRequest:
         actor_profile_id=ids[0],
         training_run_id=ids[1],
         adapter_id=ids[2],
+        branch_a_denoise=0.85,
+        branch_b_denoise=0.85,
         metadata=payload.get("metadata") or {},
     )
 

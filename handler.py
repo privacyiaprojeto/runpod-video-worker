@@ -154,7 +154,7 @@ def _handle_identity_ab(event: dict[str, Any]) -> dict[str, Any]:
             assets = []
             for asset_key, label, path in (
                 ("baseline_without_lora", "A — vídeo neutro sem LoRA", a_path),
-                ("candidate_with_lora", "B — movimento estrutural + KYC frontal + LoRA DiT 0.65", b_path),
+                ("candidate_with_lora", "B — vídeo RGB + KYC explícita + trigger token + LoRA DiT 0.65", b_path),
             ):
                 uploaded = publish_private_named_output(
                     path, settings, request.request_id, asset_key, request.contract_version
@@ -195,11 +195,30 @@ def _handle_identity_ab(event: dict[str, Any]) -> dict[str, Any]:
                     "same_neutral_source_sha256": request.base_video_ref["sha256"],
                     "branch_a_reference": "neutral_first_frame",
                     "branch_b_reference_system_tag": request.reference_image_ref["system_tag"],
+                    "branch_b_reference_asset_id": request.reference_image_ref["asset_id"],
                     "branch_b_reference_sha256": request.reference_image_ref["sha256"],
-                    "branch_b_control_mode": "privacy_motion_only_structure_v1",
+                    "branch_b_trigger_token": request.trigger_token,
+                    "branch_b_control_mode": "raw_rgb_v2v_denoise_085",
                     "branch_b_control_source_sha256": request.base_video_ref["sha256"],
-                    "branch_b_raw_rgb_control_forbidden": True,
+                    "branch_b_raw_rgb_control": True,
+                    "branch_a_k_sampler_denoise": request.branch_a_denoise,
+                    "branch_b_k_sampler_denoise": request.branch_b_denoise,
+                    "ab_denoise_paired": request.branch_a_denoise == request.branch_b_denoise,
+                    "workflow_revision": "D3.6H12-trigger-token-raw-rgb-v2v-denoise-085-v1",
                     "lora_strength": 0.65,
+                    "provenance": {
+                        "trigger_token": request.trigger_token,
+                        "reference_asset_id": request.reference_image_ref["asset_id"],
+                        "reference_sha256": request.reference_image_ref["sha256"],
+                        "control_mode": "raw_rgb_v2v_denoise_085",
+                        "control_source_sha256": request.base_video_ref["sha256"],
+                        "branch_a_denoise": request.branch_a_denoise,
+                        "branch_b_denoise": request.branch_b_denoise,
+                        "denoise_paired": request.branch_a_denoise == request.branch_b_denoise,
+                        "methodology_hotfix": "D3.6H12-HF2-paired-denoise-085-v1",
+                        "lora_strength": 0.65,
+                        "workflow_revision": "D3.6H12-trigger-token-raw-rgb-v2v-denoise-085-v1",
+                    },
                     "private_only": True,
                     "approval_allowed": False,
                     "lora_attestation": {
