@@ -8,6 +8,7 @@ EXPECTED = {
     "wan-2.1-i2v-v1.json": "wan-2.1-i2v",
     "wan-2.1-v2v-v1.json": "wan-2.1-v2v",
     "wan-2.1-v2v-identity-ab-v1.json": "wan-2.1-v2v",
+    "wan-2.1-v2v-identity-motion-abc-v1.json": "wan-2.1-v2v",
 }
 
 

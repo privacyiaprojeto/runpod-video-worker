@@ -114,6 +114,7 @@ def prepare_workflow(
         )
 
     prompt = copy.deepcopy(envelope["prompt"])
+    motion_abc = getattr(request, "task", "") == "identity.motion_abc"
     values = {
         "positive_prompt": request.positive_prompt,
         "positive_prompt_b": getattr(request, "positive_prompt_b", request.positive_prompt),
@@ -128,9 +129,11 @@ def prepare_workflow(
         "cfg": request.guidance_scale,
         "seed": request.seed,
         "denoise_b": getattr(request, "branch_b_denoise", 1.0),
+        "denoise_c": getattr(request, "branch_c_denoise", getattr(request, "branch_b_denoise", 1.0)),
         "filename_prefix": output_prefix,
-        "filename_prefix_a": f"{output_prefix}/A_without_lora",
-        "filename_prefix_b": f"{output_prefix}/B_with_lora",
+        "filename_prefix_a": f"{output_prefix}/A_baseline_without_identity" if motion_abc else f"{output_prefix}/A_without_lora",
+        "filename_prefix_b": f"{output_prefix}/B_identity_reference_without_lora" if motion_abc else f"{output_prefix}/B_with_lora",
+        "filename_prefix_c": f"{output_prefix}/C_candidate_with_lora",
         "lora_name": lora_filename,
         "lora_attestation_name": lora_attestation_name,
         "i2v_model_name": settings.i2v_model_name,

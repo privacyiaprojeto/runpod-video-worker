@@ -29,7 +29,9 @@ RUN set -eux; \
       libxext6; \
     rm -rf /var/lib/apt/lists/*; \
     ffmpeg -version; \
-    ffprobe -version
+    ffprobe -version; \
+    ffmpeg -hide_banner -filters 2>/dev/null | grep -q "edgedetect"; \
+    echo "FFMPEG_SOFTEDGE_READY"
 
 RUN set -eux; \
     git clone --filter=blob:none https://github.com/Comfy-Org/ComfyUI.git /opt/ComfyUI; \
@@ -75,7 +77,9 @@ RUN set -eux; \
       /runpod-volume/privacy-wan-runtime/temp; \
     python -m compileall -q /app/handler.py /app/privacy_worker /opt/ComfyUI/custom_nodes/privacy_lora_attestation; \
     python /app/scripts/validate_workflows.py; \
+    python /app/scripts/test_identity_motion_abc_static.py; \
     ffmpeg -version >/dev/null; \
-    ffprobe -version >/dev/null
+    ffprobe -version >/dev/null; \
+    ffmpeg -hide_banner -filters 2>/dev/null | grep -q "edgedetect"
 
 CMD ["python", "-u", "/app/handler.py"]

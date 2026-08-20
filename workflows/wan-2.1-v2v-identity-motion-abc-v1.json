@@ -1,0 +1,608 @@
+{
+  "schema_version": "privacy-comfyui-workflow-v1",
+  "engine": "wan-2.1-v2v",
+  "workflow_version": "1",
+  "description": "Controlled identity motion A/B/C v1. A uses only appearance-reduced soft-edge structural control; B adds explicit private face_front KYC plus trigger token without LoRA; C reuses the exact B conditioning and adds only the attested DiT LoRA.",
+  "prompt": {
+    "1": {
+      "inputs": {
+        "unet_name": "wan2.1_vace_14B_fp16.safetensors",
+        "weight_dtype": "default"
+      },
+      "class_type": "UNETLoader",
+      "_meta": {
+        "title": "Load Wan VACE Model"
+      }
+    },
+    "2": {
+      "inputs": {
+        "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "type": "wan",
+        "device": "default"
+      },
+      "class_type": "CLIPLoader",
+      "_meta": {
+        "title": "Load Wan Text Encoder"
+      }
+    },
+    "3": {
+      "inputs": {
+        "vae_name": "wan_2.1_vae.safetensors"
+      },
+      "class_type": "VAELoader",
+      "_meta": {
+        "title": "Load Wan VAE"
+      }
+    },
+    "4": {
+      "inputs": {
+        "text": "",
+        "clip": [
+          "2",
+          0
+        ]
+      },
+      "class_type": "CLIPTextEncode",
+      "_meta": {
+        "title": "A - Baseline Positive Prompt"
+      }
+    },
+    "5": {
+      "inputs": {
+        "text": "",
+        "clip": [
+          "2",
+          0
+        ]
+      },
+      "class_type": "CLIPTextEncode",
+      "_meta": {
+        "title": "Negative Prompt"
+      }
+    },
+    "6": {
+      "inputs": {
+        "video": "neutral-motion-01.mp4",
+        "force_rate": 16,
+        "force_size": "Custom",
+        "custom_width": 832,
+        "custom_height": 480,
+        "frame_load_cap": 17,
+        "skip_first_frames": 0,
+        "select_every_nth": 1
+      },
+      "class_type": "VHS_LoadVideo",
+      "_meta": {
+        "title": "Private Neutral Motion — Derived Soft-Edge Control"
+      }
+    },
+    "7": {
+      "inputs": {
+        "image": [
+          "6",
+          0
+        ],
+        "batch_index": 0,
+        "length": 1
+      },
+      "class_type": "ImageFromBatch",
+      "_meta": {
+        "title": "A - Soft-Edge First Frame Structural Reference"
+      }
+    },
+    "8": {
+      "inputs": {
+        "width": 832,
+        "height": 480,
+        "length": 17,
+        "batch_size": 1,
+        "strength": 1.0,
+        "positive": [
+          "4",
+          0
+        ],
+        "negative": [
+          "5",
+          0
+        ],
+        "vae": [
+          "3",
+          0
+        ],
+        "control_video": [
+          "6",
+          0
+        ],
+        "reference_image": [
+          "7",
+          0
+        ]
+      },
+      "class_type": "WanVaceToVideo",
+      "_meta": {
+        "title": "A - Soft-Edge Structural Control, No Identity"
+      }
+    },
+    "9": {
+      "inputs": {
+        "seed": 99,
+        "steps": 30,
+        "cfg": 5.0,
+        "sampler_name": "uni_pc",
+        "scheduler": "simple",
+        "denoise": 0.85,
+        "model": [
+          "1",
+          0
+        ],
+        "positive": [
+          "8",
+          0
+        ],
+        "negative": [
+          "8",
+          1
+        ],
+        "latent_image": [
+          "8",
+          2
+        ]
+      },
+      "class_type": "KSampler",
+      "_meta": {
+        "title": "A - Same Seed, Identity OFF, LoRA OFF"
+      }
+    },
+    "10": {
+      "inputs": {
+        "samples": [
+          "9",
+          0
+        ],
+        "trim_amount": [
+          "8",
+          3
+        ]
+      },
+      "class_type": "TrimVideoLatent",
+      "_meta": {
+        "title": "Trim A"
+      }
+    },
+    "11": {
+      "inputs": {
+        "samples": [
+          "10",
+          0
+        ],
+        "vae": [
+          "3",
+          0
+        ]
+      },
+      "class_type": "VAEDecode",
+      "_meta": {
+        "title": "Decode A"
+      }
+    },
+    "12": {
+      "inputs": {
+        "frame_rate": 16,
+        "loop_count": 0,
+        "filename_prefix": "privacy/identity-ab/A",
+        "format": "video/h264-mp4",
+        "pingpong": false,
+        "save_output": true,
+        "images": [
+          "11",
+          0
+        ]
+      },
+      "class_type": "VHS_VideoCombine",
+      "_meta": {
+        "title": "Save A Baseline Without Identity"
+      }
+    },
+    "13": {
+      "inputs": {
+        "model": [
+          "1",
+          0
+        ],
+        "lora_name": "identity.safetensors",
+        "strength_model": 0.65,
+        "attestation_name": "identity-ab"
+      },
+      "class_type": "PrivacyAttestedLoraLoaderModelOnly",
+      "_meta": {
+        "title": "C - Attested DiT LoRA 0.65 (Fail Fast)"
+      }
+    },
+    "14": {
+      "inputs": {
+        "seed": 99,
+        "steps": 30,
+        "cfg": 5.0,
+        "sampler_name": "uni_pc",
+        "scheduler": "simple",
+        "denoise": 0.85,
+        "model": [
+          "1",
+          0
+        ],
+        "positive": [
+          "19",
+          0
+        ],
+        "negative": [
+          "19",
+          1
+        ],
+        "latent_image": [
+          "19",
+          2
+        ]
+      },
+      "class_type": "KSampler",
+      "_meta": {
+        "title": "B - Same Seed, KYC + Trigger, LoRA OFF"
+      }
+    },
+    "15": {
+      "inputs": {
+        "samples": [
+          "14",
+          0
+        ],
+        "trim_amount": [
+          "19",
+          3
+        ]
+      },
+      "class_type": "TrimVideoLatent",
+      "_meta": {
+        "title": "Trim B"
+      }
+    },
+    "16": {
+      "inputs": {
+        "samples": [
+          "15",
+          0
+        ],
+        "vae": [
+          "3",
+          0
+        ]
+      },
+      "class_type": "VAEDecode",
+      "_meta": {
+        "title": "Decode B"
+      }
+    },
+    "17": {
+      "inputs": {
+        "frame_rate": 16,
+        "loop_count": 0,
+        "filename_prefix": "privacy/identity-ab/B",
+        "format": "video/h264-mp4",
+        "pingpong": false,
+        "save_output": true,
+        "images": [
+          "16",
+          0
+        ]
+      },
+      "class_type": "VHS_VideoCombine",
+      "_meta": {
+        "title": "Save B Identity Reference Without LoRA"
+      }
+    },
+    "18": {
+      "inputs": {
+        "image": "kyc-face-front.jpg"
+      },
+      "class_type": "LoadImage",
+      "_meta": {
+        "title": "B/C - Private KYC Face Front Reference"
+      }
+    },
+    "19": {
+      "inputs": {
+        "width": 832,
+        "height": 480,
+        "length": 17,
+        "batch_size": 1,
+        "strength": 1.0,
+        "positive": [
+          "21",
+          0
+        ],
+        "negative": [
+          "5",
+          0
+        ],
+        "vae": [
+          "3",
+          0
+        ],
+        "control_video": [
+          "6",
+          0
+        ],
+        "reference_image": [
+          "18",
+          0
+        ]
+      },
+      "class_type": "WanVaceToVideo",
+      "_meta": {
+        "title": "B/C - Soft-Edge + Explicit KYC + Trigger Token"
+      }
+    },
+    "21": {
+      "inputs": {
+        "text": "",
+        "clip": [
+          "2",
+          0
+        ]
+      },
+      "class_type": "CLIPTextEncode",
+      "_meta": {
+        "title": "B/C - Trigger Token Positive Prompt"
+      }
+    },
+    "23": {
+      "inputs": {
+        "seed": 99,
+        "steps": 30,
+        "cfg": 5.0,
+        "sampler_name": "uni_pc",
+        "scheduler": "simple",
+        "denoise": 0.85,
+        "model": [
+          "13",
+          0
+        ],
+        "positive": [
+          "19",
+          0
+        ],
+        "negative": [
+          "19",
+          1
+        ],
+        "latent_image": [
+          "19",
+          2
+        ]
+      },
+      "class_type": "KSampler",
+      "_meta": {
+        "title": "C - Same Seed, Same KYC + Trigger, LoRA ON 0.65"
+      }
+    },
+    "24": {
+      "inputs": {
+        "samples": [
+          "23",
+          0
+        ],
+        "trim_amount": [
+          "19",
+          3
+        ]
+      },
+      "class_type": "TrimVideoLatent",
+      "_meta": {
+        "title": "Trim C"
+      }
+    },
+    "25": {
+      "inputs": {
+        "samples": [
+          "24",
+          0
+        ],
+        "vae": [
+          "3",
+          0
+        ]
+      },
+      "class_type": "VAEDecode",
+      "_meta": {
+        "title": "Decode C"
+      }
+    },
+    "26": {
+      "inputs": {
+        "frame_rate": 16,
+        "loop_count": 0,
+        "filename_prefix": "privacy/identity-motion-abc/C",
+        "format": "video/h264-mp4",
+        "pingpong": false,
+        "save_output": true,
+        "images": [
+          "25",
+          0
+        ]
+      },
+      "class_type": "VHS_VideoCombine",
+      "_meta": {
+        "title": "Save C Candidate With LoRA"
+      }
+    }
+  },
+  "bindings": {
+    "positive_prompt": {
+      "node_id": "4",
+      "input": "text"
+    },
+    "negative_prompt": {
+      "node_id": "5",
+      "input": "text"
+    },
+    "base_video": {
+      "node_id": "6",
+      "input": "video"
+    },
+    "width": [
+      {
+        "node_id": "6",
+        "input": "custom_width"
+      },
+      {
+        "node_id": "8",
+        "input": "width"
+      },
+      {
+        "node_id": "19",
+        "input": "width"
+      }
+    ],
+    "height": [
+      {
+        "node_id": "6",
+        "input": "custom_height"
+      },
+      {
+        "node_id": "8",
+        "input": "height"
+      },
+      {
+        "node_id": "19",
+        "input": "height"
+      }
+    ],
+    "frames": [
+      {
+        "node_id": "6",
+        "input": "frame_load_cap"
+      },
+      {
+        "node_id": "8",
+        "input": "length"
+      },
+      {
+        "node_id": "19",
+        "input": "length"
+      }
+    ],
+    "fps": [
+      {
+        "node_id": "6",
+        "input": "force_rate"
+      },
+      {
+        "node_id": "12",
+        "input": "frame_rate"
+      },
+      {
+        "node_id": "17",
+        "input": "frame_rate"
+      },
+      {
+        "node_id": "26",
+        "input": "frame_rate"
+      }
+    ],
+    "steps": [
+      {
+        "node_id": "9",
+        "input": "steps"
+      },
+      {
+        "node_id": "14",
+        "input": "steps"
+      },
+      {
+        "node_id": "23",
+        "input": "steps"
+      }
+    ],
+    "cfg": [
+      {
+        "node_id": "9",
+        "input": "cfg"
+      },
+      {
+        "node_id": "14",
+        "input": "cfg"
+      },
+      {
+        "node_id": "23",
+        "input": "cfg"
+      }
+    ],
+    "seed": [
+      {
+        "node_id": "9",
+        "input": "seed"
+      },
+      {
+        "node_id": "14",
+        "input": "seed"
+      },
+      {
+        "node_id": "23",
+        "input": "seed"
+      }
+    ],
+    "filename_prefix_a": {
+      "node_id": "12",
+      "input": "filename_prefix"
+    },
+    "filename_prefix_b": {
+      "node_id": "17",
+      "input": "filename_prefix"
+    },
+    "lora_name": {
+      "node_id": "13",
+      "input": "lora_name"
+    },
+    "v2v_model_name": {
+      "node_id": "1",
+      "input": "unet_name"
+    },
+    "text_encoder_name": {
+      "node_id": "2",
+      "input": "clip_name"
+    },
+    "vae_name": {
+      "node_id": "3",
+      "input": "vae_name"
+    },
+    "lora_attestation_name": {
+      "node_id": "13",
+      "input": "attestation_name"
+    },
+    "source_image": {
+      "node_id": "18",
+      "input": "image"
+    },
+    "positive_prompt_b": {
+      "node_id": "21",
+      "input": "text"
+    },
+    "denoise_b": {
+      "node_id": "14",
+      "input": "denoise"
+    },
+    "filename_prefix_c": {
+      "node_id": "26",
+      "input": "filename_prefix"
+    },
+    "denoise_c": {
+      "node_id": "23",
+      "input": "denoise"
+    }
+  },
+  "output_nodes": [
+    "12",
+    "17",
+    "26"
+  ],
+  "revision": "M4-identity-motion-abc-softedge-v1",
+  "methodology_hotfix": "M4-HF-softedge-abc-lora-isolation-v1"
+}
