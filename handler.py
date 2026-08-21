@@ -38,12 +38,13 @@ from privacy_worker.identity_motion_abc import (
 from privacy_worker.downloader import download_media
 from privacy_worker.errors import ComfyUIError, DownloadError, LoraCompatibilityError, LoraNotAppliedError, WorkerError
 from privacy_worker.models import validate_required_models
+from privacy_worker.model_storage import ensure_ephemeral_disk_ready, prepare_model_storage
 from privacy_worker.output import publish_output, publish_private_named_output
 from privacy_worker.telemetry import log_event, now_ms
 from privacy_worker.visual_ab import compare_ab_videos
 from privacy_worker.workflows import prepare_workflow
 
-settings.ensure_runtime_dirs()
+_storage_state = prepare_model_storage(settings)
 _process_manager = ComfyUIProcessManager(settings)
 _client = ComfyUIClient(settings)
 atexit.register(_process_manager.shutdown)
@@ -80,6 +81,7 @@ def _identity_comfy_failure(error: ComfyUIError) -> WorkerError | None:
 def _handle_identity_ab(event: dict[str, Any]) -> dict[str, Any]:
     started_at = now_ms()
     request = parse_identity_ab_request(event)
+    ensure_ephemeral_disk_ready(settings)
     validate_required_models(request, settings)
     lock = reserve_one_shot(request, settings)
     comfy_inputs: list[Path] = []
@@ -275,6 +277,7 @@ def _handle_identity_ab(event: dict[str, Any]) -> dict[str, Any]:
 def _handle_identity_motion_abc(event: dict[str, Any]) -> dict[str, Any]:
     started_at = now_ms()
     request = parse_identity_motion_abc_request(event)
+    ensure_ephemeral_disk_ready(settings)
     validate_required_models(request, settings)
     lock = reserve_motion_one_shot(request, settings)
     comfy_inputs: list[Path] = []
@@ -530,6 +533,7 @@ def handler(event: dict[str, Any]) -> dict[str, Any]:
 
     comfy_inputs: list[Path] = []
     try:
+        ensure_ephemeral_disk_ready(settings)
         validate_required_models(request, settings)
         with tempfile.TemporaryDirectory(dir=str(settings.temp_dir), prefix=f"wan_{request.request_id}_") as temp:
             work_dir = Path(temp)

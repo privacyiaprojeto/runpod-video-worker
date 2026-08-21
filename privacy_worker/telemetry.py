@@ -15,6 +15,11 @@ SENSITIVE_KEYS = {
     "authorization",
     "token",
     "secret",
+    "r2_access_key_id",
+    "r2_secret_access_key",
+    "hf_token",
+    "kyc_url",
+    "reference_image_url",
 }
 
 
@@ -23,7 +28,10 @@ def now_ms() -> int:
 
 
 def _redact(value: Any, key: str | None = None) -> Any:
-    if key and key.lower() in SENSITIVE_KEYS:
+    normalized_key = key.lower() if key else ""
+    if normalized_key in SENSITIVE_KEYS or any(
+        marker in normalized_key for marker in ("secret", "credential", "signed_url")
+    ):
         if isinstance(value, str) and value.startswith(("http://", "https://")):
             parsed = urlsplit(value)
             return f"{parsed.scheme}://{parsed.netloc}/[redacted]"

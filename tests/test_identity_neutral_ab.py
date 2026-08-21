@@ -129,6 +129,23 @@ def test_explicit_kyc_asset_and_sha_must_match():
         parse_identity_ab_request(bad_sha)
 
 
+def test_branch_b_must_use_private_face_front_kyc():
+    """branch B must use private face_front KYC."""
+    request = parse_identity_ab_request(event())
+    assert request.reference_image_ref["system_tag"] == "face_front"
+    assert request.reference_image_ref["bucket"] == "privacy-media"
+
+    wrong_tag = event()
+    wrong_tag["input"]["reference_image"]["system_tag"] = "profile"
+    with pytest.raises(ContractError, match="face_front"):
+        parse_identity_ab_request(wrong_tag)
+
+    public_bucket = event()
+    public_bucket["input"]["reference_image"]["bucket"] = "public-media"
+    with pytest.raises(ContractError, match="bucket privado aprovado"):
+        parse_identity_ab_request(public_bucket)
+
+
 def test_one_shot_lock_is_scoped_by_request_id(tmp_path):
     from privacy_worker.identity_ab import reserve_one_shot
     first_event = event(); first_event["input"]["request_id"] = "ab-request-001"

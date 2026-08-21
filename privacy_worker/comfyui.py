@@ -13,6 +13,7 @@ import requests
 
 from .config import Settings
 from .errors import ComfyUIError, OutputError
+from .model_storage import write_extra_model_paths_config
 from .telemetry import log_event, now_ms
 
 
@@ -70,9 +71,8 @@ class ComfyUIProcessManager:
                     "--temp-directory",
                     str(self.settings.temp_dir),
                 ]
-                extra_paths = self.settings.app_root / "extra_model_paths.yaml"
-                if extra_paths.exists():
-                    command.extend(["--extra-model-paths-config", str(extra_paths)])
+                extra_paths = write_extra_model_paths_config(self.settings)
+                command.extend(["--extra-model-paths-config", str(extra_paths)])
                 log_event("comfyui_starting", request_id=request_id, command=command)
                 self._process = subprocess.Popen(
                     command,
@@ -198,6 +198,40 @@ class ComfyUIClient:
                     if isinstance(entry, dict) and entry.get("filename"):
                         yield entry
 
+    def _cleanup_ephemeral_output(self, candidate: dict[str, Any], request_id: str) -> None:
+        if self.settings.model_source_mode != "cached_model":
+            return
+        output_type = str(candidate.get("type") or "output").lower()
+        roots = {
+            "output": self.settings.output_dir,
+            "temp": self.settings.temp_dir,
+        }
+        root = roots.get(output_type)
+        if root is None:
+            raise OutputError("Tipo de saída ComfyUI inseguro para cleanup efêmero.")
+        root = root.resolve(strict=True)
+        candidate_path = root / str(candidate.get("subfolder") or "") / str(candidate["filename"])
+        if candidate_path.is_symlink():
+            raise OutputError("O cleanup efêmero recusou uma saída ComfyUI por symlink.")
+        resolved = candidate_path.resolve(strict=False)
+        try:
+            resolved.relative_to(root)
+        except ValueError as exc:
+            raise OutputError("A saída ComfyUI resolve para fora da raiz efêmera controlada.") from exc
+        if not candidate_path.exists():
+            return
+        if not candidate_path.is_file():
+            raise OutputError("A saída ComfyUI local não é um arquivo regular.")
+        try:
+            candidate_path.unlink()
+        except OSError as exc:
+            raise OutputError("Falha ao remover a saída local efêmera do ComfyUI.") from exc
+        log_event(
+            "comfyui_ephemeral_output_removed",
+            request_id=request_id,
+            filename=candidate.get("filename"),
+        )
+
     def download_output(
         self,
         *,
@@ -243,6 +277,7 @@ class ComfyUIClient:
             raise OutputError("Falha ao recuperar o vídeo produzido pelo ComfyUI.") from error
         if not destination.exists() or destination.stat().st_size <= 0:
             raise OutputError("O ComfyUI retornou um arquivo de saída vazio.")
+        self._cleanup_ephemeral_output(candidate, request_id)
         log_event(
             "comfyui_output_downloaded",
             request_id=request_id,

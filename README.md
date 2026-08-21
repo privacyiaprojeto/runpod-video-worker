@@ -84,6 +84,28 @@ OUTPUT_MODE=private_r2
 
 O objeto é enviado com cache privado e o worker retorna uma Signed URL curta, `r2_bucket` e `r2_key`. Não existe suporte a URL pública persistente.
 
+## RunPod Cached Models (opt-in)
+
+O modo padrão permanece `MODEL_SOURCE_MODE=network_volume`. O modo
+`cached_model` não baixa pesos: ele exige `CACHED_MODEL_ID=org/repo` e uma
+`CACHED_MODEL_REVISION` exata já montada em
+`/runpod-volume/huggingface-cache/hub/models--org--repo/snapshots/REVISION`.
+O snapshot precisa conter os diretórios `diffusion_models`, `text_encoders`,
+`vae` e `clip_vision`, com os mesmos arquivos obrigatórios descritos acima. No
+top-level, somente os metadados opcionais `.gitattributes` e `README.md` também
+são aceitos.
+
+Nesse modo, `MODEL_ROOT` usa por padrão `/tmp/privacy-models`: as quatro
+categorias read-only são symlinks para o snapshot e `loras` é um diretório
+efêmero gravável. `RUNTIME_ROOT` usa `/tmp/privacy-wan-runtime`. A configuração
+falha no startup se o backend global de one-shot lock não for explicitamente
+`IDENTITY_ONE_SHOT_LOCK_BACKEND=r2` ou se o R2 privado não estiver configurado.
+
+`EPHEMERAL_MIN_FREE_GB=20` é o piso conservador padrão para adapter, mídias e
+outputs temporários. Ajustes precisam ser explícitos e o worker sempre verifica
+o espaço antes de downloads pesados. Nenhum modelo ou token HF é incluído na
+imagem.
+
 ## Build
 
 ```bash

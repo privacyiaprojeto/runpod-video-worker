@@ -22,6 +22,7 @@ from .lora_namespace import (
 
 from .config import Settings
 from .errors import ContractError, DownloadError, LoraCompatibilityError, LoraNotAppliedError
+from .one_shot_lock import R2OneShotLock, reserve_r2_one_shot
 
 CONTRACT_VERSION = "privacy-identity-neutral-ab-v1"
 WORKFLOW_ID = "wan-2.1-v2v-identity-ab-v1"
@@ -333,9 +334,8 @@ def one_shot_lock_path(request: IdentityAbRequest, settings: Settings) -> Path:
     return scope / f"{request_digest}.json"
 
 
-def reserve_one_shot(request: IdentityAbRequest, settings: Settings) -> Path:
+def reserve_one_shot(request: IdentityAbRequest, settings: Settings) -> Path | R2OneShotLock:
     path = one_shot_lock_path(request, settings)
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "lock_version": 2,
         "request_id": request.request_id,
@@ -347,6 +347,18 @@ def reserve_one_shot(request: IdentityAbRequest, settings: Settings) -> Path:
         "automatic_retry": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    if settings.identity_one_shot_lock_backend == "r2":
+        if not settings.r2_configured:
+            raise ContractError("O backend de lock r2 exige o R2 privado configurado.")
+        try:
+            client = r2_client(settings)
+        except Exception as exc:
+            raise ContractError("Falha ao inicializar o backend de lock global r2.") from exc
+        return reserve_r2_one_shot(client, request, settings, payload)
+    if settings.identity_one_shot_lock_backend != "filesystem":
+        raise ContractError("IDENTITY_ONE_SHOT_LOCK_BACKEND inválido.")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with path.open("x", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
@@ -357,6 +369,9 @@ def reserve_one_shot(request: IdentityAbRequest, settings: Settings) -> Path:
     return path
 
 
-def update_lock(path: Path, status: str, **extra: Any) -> None:
+def update_lock(path: Path | R2OneShotLock, status: str, **extra: Any) -> None:
+    if isinstance(path, R2OneShotLock):
+        path.update(status, **extra)
+        return
     payload = json.loads(path.read_text(encoding="utf-8"))
     path.write_text(json.dumps({**payload, "status": status, **extra}, indent=2), encoding="utf-8")

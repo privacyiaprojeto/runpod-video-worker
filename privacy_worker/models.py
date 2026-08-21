@@ -25,6 +25,6 @@ def validate_required_models(request: ProductionRequest, settings: Settings) -> 
     missing = [str(path) for path in _required_paths(request, settings) if not path.is_file()]
     if missing:
         raise WorkflowError(
-            "Modelos Wan necessários não estão disponíveis no Network Volume.",
+            "Modelos Wan necessários não estão disponíveis no storage configurado.",
             details={"missing_models": missing, "engine": request.engine},
         )

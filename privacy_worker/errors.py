@@ -22,6 +22,14 @@ class WorkflowError(WorkerError):
     code = "WORKFLOW_ERROR"
 
 
+class ModelStorageError(WorkerError):
+    code = "MODEL_STORAGE_CONFIGURATION_ERROR"
+
+
+class EphemeralDiskError(WorkerError):
+    code = "EPHEMERAL_DISK_NOT_READY"
+
+
 class ComfyUIError(WorkerError):
     code = "COMFYUI_RUNTIME_ERROR"
     retryable = True

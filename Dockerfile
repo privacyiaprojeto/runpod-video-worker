@@ -11,7 +11,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
     APP_ROOT=/app \
     COMFYUI_ROOT=/opt/ComfyUI \
     WORKFLOW_ROOT=/app/workflows \
+    MODEL_SOURCE_MODE=network_volume \
+    MODEL_ROOT=/runpod-volume/models \
     RUNTIME_ROOT=/runpod-volume/privacy-wan-runtime \
+    CACHED_MODEL_CACHE_ROOT=/runpod-volume/huggingface-cache/hub \
+    EPHEMERAL_MIN_FREE_GB=20 \
+    IDENTITY_ONE_SHOT_LOCK_BACKEND=filesystem \
     HF_HOME=/runpod-volume/huggingface \
     COMFYUI_START_LOCAL=true
 
