@@ -63,6 +63,7 @@ COPY requirements.txt /app/requirements.txt
 RUN python -m pip install --no-cache-dir -r /app/requirements.txt
 
 COPY handler.py /app/handler.py
+COPY pod_server.py /app/pod_server.py
 COPY privacy_worker /app/privacy_worker
 COPY workflows /app/workflows
 COPY scripts /app/scripts
@@ -80,7 +81,7 @@ RUN set -eux; \
       /runpod-volume/privacy-wan-runtime/input \
       /runpod-volume/privacy-wan-runtime/output \
       /runpod-volume/privacy-wan-runtime/temp; \
-    python -m compileall -q /app/handler.py /app/privacy_worker /opt/ComfyUI/custom_nodes/privacy_lora_attestation; \
+    python -m compileall -q /app/handler.py /app/pod_server.py /app/privacy_worker /opt/ComfyUI/custom_nodes/privacy_lora_attestation; \
     python /app/scripts/validate_workflows.py; \
     python /app/scripts/test_identity_motion_abc_static.py; \
     ffmpeg -version >/dev/null; \
