@@ -232,8 +232,18 @@ def materialize_lora(
     staged = download_private_ref(
         client, request.adapter_ref, work_dir / "identity_adapter_original.safetensors", 4096
     )
+    identity_scope_sha256 = hashlib.sha256(
+        "\0".join(
+            (
+                str(request.actor_profile_id),
+                str(request.training_run_id),
+                str(request.adapter_id),
+            )
+        ).encode("utf-8")
+    ).hexdigest()
     name = (
-        f"privacy_identity_{request.adapter_ref['sha256'][:24]}_"
+        f"privacy_identity_{identity_scope_sha256[:24]}_"
+        f"{request.adapter_ref['sha256'][:24]}_"
         f"{CONVERSION_VERSION}.safetensors"
     )
     destination = settings.model_root / "loras" / name
@@ -252,6 +262,15 @@ def materialize_lora(
         cached = read_conversion_attestation(attestation_path)
         if cached.get("source_sha256") != request.adapter_ref["sha256"]:
             raise LoraCompatibilityError("Cache traduzido pertence a outro adapter.")
+        if (
+            cached.get("identity_scope_sha256") != identity_scope_sha256
+            or cached.get("actor_profile_id") != str(request.actor_profile_id)
+            or cached.get("training_run_id") != str(request.training_run_id)
+            or cached.get("adapter_id") != str(request.adapter_id)
+        ):
+            raise LoraCompatibilityError(
+                "Cache traduzido pertence a outro escopo identitario."
+            )
         if cached.get("translated_sha256") != sha256_file(destination):
             raise LoraCompatibilityError("Checksum do cache traduzido é divergente.")
         if cached.get("model_layout_sha256") != model_layout_sha256(model_path):
@@ -267,7 +286,14 @@ def materialize_lora(
         source_sha256=request.adapter_ref["sha256"],
     )
     os.replace(converted_temp, destination)
-    attestation = {**attestation, "translated_path": str(destination)}
+    attestation = {
+        **attestation,
+        "identity_scope_sha256": identity_scope_sha256,
+        "actor_profile_id": str(request.actor_profile_id),
+        "training_run_id": str(request.training_run_id),
+        "adapter_id": str(request.adapter_id),
+        "translated_path": str(destination),
+    }
     write_conversion_attestation(attestation_path, attestation)
     staged.unlink(missing_ok=True)
     return destination, name, attestation
