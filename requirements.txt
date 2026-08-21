@@ -1,4 +1,4 @@
 runpod==1.10.1
-requests==2.32.3
-boto3==1.35.36
+requests==2.34.2
+boto3==1.43.40
 safetensors>=0.5.3,<1.0
