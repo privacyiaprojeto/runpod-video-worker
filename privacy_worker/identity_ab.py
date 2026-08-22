@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -278,14 +277,12 @@ def materialize_lora(
         staged.unlink(missing_ok=True)
         return destination, name, cached
 
-    converted_temp = work_dir / name
     attestation = convert_diffsynth_peft_lora(
         staged,
         model_path,
-        converted_temp,
+        destination,
         source_sha256=request.adapter_ref["sha256"],
     )
-    os.replace(converted_temp, destination)
     attestation = {
         **attestation,
         "identity_scope_sha256": identity_scope_sha256,
