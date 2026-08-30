@@ -22,6 +22,47 @@ from privacy_worker.model_storage import prepare_model_storage
 
 
 POD_CONTRACT_VERSION = "privacy-pod-runtime-v1"
+POD_SUPPORTED_MODEL_SOURCE_MODES = {"network_volume", "cached_model", "r2_registry"}
+
+_storage_bootstrap_lock = threading.Lock()
+_storage_bootstrap_status = "not_started"
+_storage_bootstrap_error: str | None = None
+
+
+def storage_bootstrap_snapshot() -> tuple[str, str | None]:
+    with _storage_bootstrap_lock:
+        return _storage_bootstrap_status, _storage_bootstrap_error
+
+
+def _storage_bootstrap_worker() -> None:
+    global _storage_bootstrap_status, _storage_bootstrap_error
+
+    try:
+        prepare_model_storage(settings)
+    except Exception as exc:
+        traceback.print_exc()
+        with _storage_bootstrap_lock:
+            _storage_bootstrap_status = "failed"
+            _storage_bootstrap_error = f"{type(exc).__name__}: {str(exc)[:500]}"
+    else:
+        with _storage_bootstrap_lock:
+            _storage_bootstrap_status = "ready"
+            _storage_bootstrap_error = None
+
+
+def start_storage_bootstrap() -> None:
+    global _storage_bootstrap_status
+
+    with _storage_bootstrap_lock:
+        if _storage_bootstrap_status in {"starting", "ready"}:
+            return
+        _storage_bootstrap_status = "starting"
+
+    threading.Thread(
+        target=_storage_bootstrap_worker,
+        name="privacy-pod-model-storage-bootstrap",
+        daemon=True,
+    ).start()
 
 
 def utc_now() -> str:
@@ -404,9 +445,9 @@ def readiness_report(
 ) -> dict[str, Any]:
     blockers: list[str] = []
 
-    if settings.model_source_mode != "network_volume":
+    if settings.model_source_mode not in POD_SUPPORTED_MODEL_SOURCE_MODES:
         blockers.append(
-            "MODEL_SOURCE_MODE_NOT_NETWORK_VOLUME"
+            "MODEL_SOURCE_MODE_NOT_POD_SUPPORTED"
         )
 
     if (
@@ -443,32 +484,40 @@ def readiness_report(
             "COMFYUI_RUNTIME_MISSING"
         )
 
-    try:
-        prepare_model_storage(settings)
+    bootstrap_status, bootstrap_error = storage_bootstrap_snapshot()
 
-    except Exception as exc:
-        print(
-            "[pod-readiness] storage blocker: "
-            f"{type(exc).__name__}: {exc}",
-            flush=True,
+    if bootstrap_status == "not_started":
+        start_storage_bootstrap()
+        bootstrap_status, bootstrap_error = storage_bootstrap_snapshot()
+
+    if bootstrap_status == "starting":
+        blockers.append(
+            "MODEL_STORAGE_BOOTSTRAP_IN_PROGRESS"
         )
-
+    elif bootstrap_status == "failed":
+        if bootstrap_error:
+            print(
+                "[pod-readiness] storage blocker: "
+                f"{bootstrap_error}",
+                flush=True,
+            )
         blockers.append(
             "MODEL_STORAGE_NOT_READY"
         )
 
-    if not runtime_disk_ready():
-        blockers.append(
-            "EPHEMERAL_RUNTIME_DISK_NOT_READY"
-        )
+    if bootstrap_status == "ready":
+        if not runtime_disk_ready():
+            blockers.append(
+                "EPHEMERAL_RUNTIME_DISK_NOT_READY"
+            )
 
-    if any(
-        not path.is_file()
-        for path in required_model_paths()
-    ):
-        blockers.append(
-            "REQUIRED_MODELS_NOT_READY"
-        )
+        if any(
+            not path.is_file()
+            for path in required_model_paths()
+        ):
+            blockers.append(
+                "REQUIRED_MODELS_NOT_READY"
+            )
 
     if config.require_cuda:
         try:
@@ -508,6 +557,8 @@ def readiness_report(
             not blockers,
         "blockers":
             blockers,
+        "model_storage_bootstrap":
+            bootstrap_status,
     }
 
 
@@ -826,6 +877,7 @@ class PrivacyPodRequestHandler(
 def main() -> None:
     config = PodServerConfig.from_env()
     config.validate_startup()
+    start_storage_bootstrap()
 
     server = PrivacyPodHTTPServer(
         (

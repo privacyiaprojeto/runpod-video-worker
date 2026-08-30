@@ -37,7 +37,7 @@ def _storage_path(name: str, *, legacy: str, cached: str) -> Path:
     configured = os.getenv(name)
     configured_path = Path(configured) if configured else None
     mode = os.getenv("MODEL_SOURCE_MODE", "network_volume").strip().lower()
-    if mode == "cached_model" and (
+    if mode in {"cached_model", "r2_registry"} and (
         configured_path is None or configured_path == Path(legacy)
     ):
         return Path(cached)
@@ -91,6 +91,20 @@ class Settings:
     r2_bucket_name: str = os.getenv("R2_BUCKET_NAME", "").strip()
     r2_prefix: str = os.getenv("R2_PREFIX", "wan/private-tmp").strip().strip("/")
     r2_signed_url_ttl_seconds: int = _int("R2_SIGNED_URL_TTL_SECONDS", 900)
+
+    # M4 canonical model registry — independent from customer/media R2.
+    model_registry_r2_endpoint_url: str = os.getenv(
+        "MODEL_REGISTRY_R2_ENDPOINT_URL", ""
+    ).strip()
+    model_registry_r2_access_key_id: str = os.getenv(
+        "MODEL_REGISTRY_R2_ACCESS_KEY_ID", ""
+    ).strip()
+    model_registry_r2_secret_access_key: str = os.getenv(
+        "MODEL_REGISTRY_R2_SECRET_ACCESS_KEY", ""
+    ).strip()
+    model_registry_r2_bucket_name: str = os.getenv(
+        "MODEL_REGISTRY_R2_BUCKET_NAME", "ia-adulta-model-registry"
+    ).strip()
     identity_one_shot_lock_backend: str = os.getenv(
         "IDENTITY_ONE_SHOT_LOCK_BACKEND", "filesystem"
     ).strip().lower()
@@ -128,6 +142,17 @@ class Settings:
                 self.r2_access_key_id,
                 self.r2_secret_access_key,
                 self.r2_bucket_name,
+            ]
+        )
+
+    @property
+    def model_registry_r2_configured(self) -> bool:
+        return all(
+            [
+                self.model_registry_r2_endpoint_url,
+                self.model_registry_r2_access_key_id,
+                self.model_registry_r2_secret_access_key,
+                self.model_registry_r2_bucket_name,
             ]
         )
 

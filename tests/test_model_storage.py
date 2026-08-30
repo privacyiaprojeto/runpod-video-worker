@@ -81,6 +81,14 @@ def test_cached_mode_replaces_inherited_legacy_roots(monkeypatch):
     ) == Path("/tmp/privacy-models")
 
 
+def test_r2_registry_mode_replaces_inherited_legacy_roots(monkeypatch):
+    monkeypatch.setenv("MODEL_SOURCE_MODE", "r2_registry")
+    monkeypatch.setenv("MODEL_ROOT", "/runpod-volume/models")
+    assert _storage_path(
+        "MODEL_ROOT", legacy="/runpod-volume/models", cached="/tmp/privacy-models"
+    ) == Path("/tmp/privacy-models")
+
+
 @pytest.mark.parametrize(
     "revision",
     ("", "main", "release-v1", "a" * 39, "g" * 40),
