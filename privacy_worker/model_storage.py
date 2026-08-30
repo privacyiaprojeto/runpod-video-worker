@@ -12,6 +12,7 @@ from typing import Any
 
 from .config import Settings
 from .errors import EphemeralDiskError, ModelStorageError
+from .model_registry import materialize_canonical_model_registry
 from .telemetry import log_event
 
 
@@ -21,7 +22,7 @@ MODEL_CATEGORIES = (
     "vae",
     "clip_vision",
 )
-MODEL_SOURCE_MODES = {"network_volume", "cached_model"}
+MODEL_SOURCE_MODES = {"network_volume", "cached_model", "r2_registry"}
 ONE_SHOT_LOCK_BACKENDS = {"filesystem", "r2"}
 ALLOWED_TOP_LEVEL_METADATA = {".gitattributes", "README.md"}
 
@@ -283,7 +284,7 @@ def write_extra_model_paths_config(settings: Settings) -> Path:
 
 
 def ensure_ephemeral_disk_ready(settings: Settings) -> dict[str, int | float] | None:
-    if settings.model_source_mode != "cached_model":
+    if settings.model_source_mode not in {"cached_model", "r2_registry"}:
         return None
     roots = (settings.runtime_root, settings.model_root)
     free_values: list[int] = []
@@ -317,34 +318,50 @@ def ensure_ephemeral_disk_ready(settings: Settings) -> dict[str, int | float] | 
 
 def _validate_storage_settings(settings: Settings) -> None:
     if settings.model_source_mode not in MODEL_SOURCE_MODES:
-        raise ModelStorageError("MODEL_SOURCE_MODE inválido; use network_volume ou cached_model.")
+        raise ModelStorageError(
+            "MODEL_SOURCE_MODE inválido; use network_volume, cached_model ou r2_registry."
+        )
     if settings.identity_one_shot_lock_backend not in ONE_SHOT_LOCK_BACKENDS:
         raise ModelStorageError(
             "IDENTITY_ONE_SHOT_LOCK_BACKEND inválido; use filesystem ou r2."
         )
-    if settings.model_source_mode == "cached_model":
+    if settings.model_source_mode in {"cached_model", "r2_registry"}:
         if settings.identity_one_shot_lock_backend != "r2":
             raise ModelStorageError(
-                "MODEL_SOURCE_MODE=cached_model exige IDENTITY_ONE_SHOT_LOCK_BACKEND=r2."
+                f"MODEL_SOURCE_MODE={settings.model_source_mode} exige "
+                "IDENTITY_ONE_SHOT_LOCK_BACKEND=r2."
             )
         if not settings.r2_configured:
             raise ModelStorageError(
                 "O backend global r2 exige o R2 privado já configurado no worker."
             )
-        cache_root = settings.cached_model_cache_root.resolve(strict=False)
+
         model_root = settings.model_root.resolve(strict=False)
         runtime_root = settings.runtime_root.resolve(strict=False)
         if _inside(model_root, runtime_root) or _inside(runtime_root, model_root):
             raise ModelStorageError("MODEL_ROOT e RUNTIME_ROOT precisam ser raízes separadas.")
         if _is_directory_link(settings.runtime_root):
             raise ModelStorageError("RUNTIME_ROOT efêmero precisa ser um diretório local real.")
-        for name, root in (
-            ("MODEL_ROOT", settings.model_root),
-            ("RUNTIME_ROOT", settings.runtime_root),
+
+        if settings.model_source_mode == "cached_model":
+            cache_root = settings.cached_model_cache_root.resolve(strict=False)
+            for name, root in (
+                ("MODEL_ROOT", settings.model_root),
+                ("RUNTIME_ROOT", settings.runtime_root),
+            ):
+                resolved = root.resolve(strict=False)
+                if _inside(resolved, cache_root) or _inside(cache_root, resolved):
+                    raise ModelStorageError(
+                        f"{name} não pode sobrepor o cache read-only de modelos."
+                    )
+
+        if (
+            settings.model_source_mode == "r2_registry"
+            and not settings.model_registry_r2_configured
         ):
-            resolved = root.resolve(strict=False)
-            if _inside(resolved, cache_root) or _inside(cache_root, resolved):
-                raise ModelStorageError(f"{name} não pode sobrepor o cache read-only de modelos.")
+            raise ModelStorageError(
+                "MODEL_SOURCE_MODE=r2_registry exige o R2 MASTER do Model Registry configurado."
+            )
 
 
 def prepare_model_storage(settings: Settings) -> ModelStorageState:
@@ -356,6 +373,11 @@ def prepare_model_storage(settings: Settings) -> ModelStorageState:
         validate_cached_model_snapshot(snapshot, settings)
         create_writable_model_overlay(snapshot, settings.model_root)
         settings.ensure_runtime_dirs()
+        disk = ensure_ephemeral_disk_ready(settings)
+    elif settings.model_source_mode == "r2_registry":
+        settings.ensure_runtime_dirs()
+        materialize_canonical_model_registry(settings)
+        (settings.model_root / "loras").mkdir(parents=True, exist_ok=True)
         disk = ensure_ephemeral_disk_ready(settings)
     else:
         settings.ensure_runtime_dirs()

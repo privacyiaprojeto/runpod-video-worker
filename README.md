@@ -106,6 +106,31 @@ outputs temporários. Ajustes precisam ser explícitos e o worker sempre verific
 o espaço antes de downloads pesados. Nenhum modelo ou token HF é incluído na
 imagem.
 
+## R2 Canonical Registry Cold Bootstrap (opt-in)
+
+O modo `MODEL_SOURCE_MODE=r2_registry` é o fallback frio para POD efêmero quando
+nenhum datacenter com Warm Cache homologado possui GPU Secure alugável. Ele NÃO
+substitui os Warm Caches e não volta ao Serverless.
+
+Nesse modo, os cinco pesos Wan canônicos são hidratados do bucket independente
+`ia-adulta-model-registry` para `/tmp/privacy-models`, com tamanho e SHA-256
+pinados no runtime. Downloads usam `.part` + promoção atômica, sem retry
+automático de transferência e com reserva de disco fail-closed. O bucket/credencial
+do Model Registry é separado do `R2_*` usado por mídia privada:
+
+```env
+MODEL_REGISTRY_R2_ENDPOINT_URL=...
+MODEL_REGISTRY_R2_ACCESS_KEY_ID=...
+MODEL_REGISTRY_R2_SECRET_ACCESS_KEY=...
+MODEL_REGISTRY_R2_BUCKET_NAME=ia-adulta-model-registry
+```
+
+O servidor POD inicia o bootstrap em background e `/readyz` permanece bloqueado
+com `MODEL_STORAGE_BOOTSTRAP_IN_PROGRESS` até todos os pesos obrigatórios estarem
+materializados e verificados. O Pod dinâmico deve reservar container disk
+suficiente para o bundle (~70.52 GiB) mais runtime/outputs; a política do control
+plane define esse tamanho e continua fechada por padrão.
+
 ## Build
 
 ```bash
